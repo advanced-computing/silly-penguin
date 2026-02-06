@@ -34,3 +34,8 @@ The exact degree to which non-economic factors, such as local public holidays or
 Since the data spans various regions, aligning all period timestamps to a single standard is critical for accurate cross-regional comparison.
 
 Managing and cleaning thousands of rows of hourly data per region can lead to memory bottlenecks in standard Notebook environments.
+
+## 7. Colab Link
+<a target="_blank" href="https://colab.research.google.com/github/advanced-computing/silly-penguin">
+  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
+</a>

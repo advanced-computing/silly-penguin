@@ -7,6 +7,7 @@ import streamlit as st
 
 st.set_page_config(page_title="EIA Grid Monitor", page_icon="⚡")
 st.title("⚡ California (CISO) Grid Monitor")
+st.subheader("Xingyi Wang, Wuhao Xia") 
 st.markdown("Real-time analysis of **Actual Demand** vs. **Day-ahead Forecast**.")
 
 from dotenv import load_dotenv

@@ -1,37 +1,42 @@
-import os
-
-import matplotlib.pyplot as plt
+import streamlit as st
 import pandas as pd
 import requests
-import streamlit as st
-
-st.set_page_config(page_title="EIA Grid Monitor", page_icon="⚡")
-st.title("⚡ California (CISO) Grid Monitor")
-st.subheader("Xingyi Wang, Wuhao Xia") 
-st.markdown("Real-time analysis of **Actual Demand** vs. **Day-ahead Forecast**.")
-
+import matplotlib.pyplot as plt
+import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# 1. 页面配置 (必须作为第一个 Streamlit 命令)
+st.set_page_config(page_title="EIA Grid Monitor", page_icon="⚡", layout="wide")
 
+# 2. 安全加载 API Key
+load_dotenv()
 api_key = os.getenv("EIA_API_KEY")
+
+# 尝试从 Streamlit Secrets 读取 (如果本地 .env 失败)
 if not api_key:
     try:
         api_key = st.secrets["EIA_API_KEY"]
-    except FileNotFoundError:
-        st.error("API Key not found. Please set it in .env or Streamlit Secrets.")
+    except (FileNotFoundError, KeyError):
+        st.error(
+            "API Key not found. Please set it in .env (Local) or Streamlit Secrets (Cloud)."
+        )
         st.stop()
+
+# ==========================================
+# 核心函数定义
+# ==========================================
 
 
 @st.cache_data(ttl=3600)
 def get_eia_data(api_key):
+    """从 EIA API 获取电力数据"""
     url = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
     params = {
         "api_key": api_key,
         "frequency": "hourly",
         "data[0]": "value",
         "facets[respondent][]": "CISO",
-        "facets[type][]": ["D", "DF"],
+        "facets[type][]": ["D", "DF"],  # D=Actual, DF=Forecast
         "start": "2025-01-01T00",
         "end": "2026-02-01T00",
         "sort[0][column]": "period",
@@ -43,48 +48,176 @@ def get_eia_data(api_key):
     if response.status_code == 200:
         data = response.json()["response"]["data"]
         df = pd.DataFrame(data)
-
         df["value"] = pd.to_numeric(df["value"], errors="coerce")
         df["period"] = pd.to_datetime(df["period"])
         return df
     else:
-        st.error(f"API Error: {response.status_code}")
+        st.error(f"EIA API Error: {response.status_code}")
         return pd.DataFrame()
 
 
-with st.spinner("Fetching data from EIA API..."):
-    df = get_eia_data(api_key)
+@st.cache_data(ttl=3600)
+def get_weather_data():
+    """从 Open-Meteo API 获取洛杉矶历史气温 (无需 Key)"""
+    url = "https://archive-api.open-meteo.com/v1/archive"
+    params = {
+        "latitude": 34.05,  # 洛杉矶坐标 (代表 CISO 核心区)
+        "longitude": -118.24,
+        "start_date": "2025-01-01",  # 与 EIA 数据时间对齐
+        "end_date": "2026-02-01",
+        "daily": ["temperature_2m_max", "temperature_2m_min", "weathercode"],
+        "timezone": "America/Los_Angeles",
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        daily = data["daily"]
+        df = pd.DataFrame(
+            {
+                "date": pd.to_datetime(daily["time"]),
+                "max_temp": daily["temperature_2m_max"],
+                "min_temp": daily["temperature_2m_min"],
+            }
+        )
+        # 计算日平均气温
+        df["avg_temp"] = (df["max_temp"] + df["min_temp"]) / 2
+        return df
+    else:
+        st.error("Weather API Error")
+        return pd.DataFrame()
 
-if not df.empty:
-    df_pivot = df.pivot(index="period", columns="type-name", values="value")
 
-    st.sidebar.header("Filter Options")
-    days_to_show = st.sidebar.slider("Days to visualize", 1, 30, 7)
+# ==========================================
+# 侧边栏导航
+# ==========================================
+st.sidebar.title("Navigation")
+page = st.sidebar.radio(
+    "Go to", ["⚡ Real-time Grid Monitor", "🌡️ Weather Impact Analysis"]
+)
 
-    df_display = df_pivot.head(days_to_show * 24)
+# ==========================================
+# PAGE 1: 实时电网监控 (保留你的原始功能)
+# ==========================================
+if page == "⚡ Real-time Grid Monitor":
+    st.title("⚡ California (CISO) Grid Monitor")
+    st.subheader("Xingyi Wang, Wuhao Xia")
+    st.markdown("Real-time analysis of **Actual Demand** vs. **Day-ahead Forecast**.")
 
-    last_actual = df_display["Demand"].iloc[0]
-    last_forecast = df_display["Day-ahead demand forecast"].iloc[0]
-    delta = last_actual - last_forecast
+    with st.spinner("Fetching data from EIA API..."):
+        df = get_eia_data(api_key)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Latest Actual Demand", f"{last_actual:,.0f} MWh")
-    col2.metric("Latest Forecast", f"{last_forecast:,.0f} MWh")
-    col3.metric("Forecast Error (Delta)", f"{delta:,.0f} MWh", delta_color="inverse")
+    if not df.empty:
+        # 数据处理
+        df_pivot = df.pivot(index="period", columns="type-name", values="value")
 
-    st.subheader(f"Demand vs. Forecast (Last {days_to_show} Days)")
+        # 侧边栏过滤器
+        st.sidebar.header("Filter Options")
+        days_to_show = st.sidebar.slider("Days to visualize", 1, 30, 7)
+        df_display = df_pivot.head(days_to_show * 24)
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    df_display.plot(ax=ax, linewidth=2)
-    ax.set_ylabel("Megawatthours (MWh)")
-    ax.set_xlabel("Time")
-    ax.grid(True, linestyle="--", alpha=0.5)
-    ax.legend(["Forecast", "Actual Demand"])
+        # 核心指标 (KPIs)
+        try:
+            last_actual = df_display["Demand"].iloc[0]
+            last_forecast = df_display["Day-ahead demand forecast"].iloc[0]
+            delta = last_actual - last_forecast
 
-    st.pyplot(fig)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Latest Actual Demand", f"{last_actual:,.0f} MWh")
+            col2.metric("Latest Forecast", f"{last_forecast:,.0f} MWh")
+            col3.metric(
+                "Forecast Error (Delta)", f"{delta:,.0f} MWh", delta_color="inverse"
+            )
+        except KeyError:
+            st.warning("Data incomplete for KPI calculation.")
 
-    with st.expander("See Raw Data"):
-        st.dataframe(df_display)
+        # 可视化图表
+        st.subheader(f"Demand vs. Forecast (Last {days_to_show} Days)")
+        fig, ax = plt.subplots(figsize=(10, 5))
+        df_display.plot(ax=ax, linewidth=2)
+        ax.set_ylabel("Megawatthours (MWh)")
+        ax.set_xlabel("Time")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.legend(["Forecast", "Actual Demand"])
+        st.pyplot(fig)
 
-else:
-    st.warning("No data available. Please check API Key or connection.")
+        with st.expander("See Raw Data"):
+            st.dataframe(df_display)
+    else:
+        st.warning("No data available. Please check API Key or connection.")
+
+# ==========================================
+# PAGE 2: 天气影响分析 (新功能)
+# ==========================================
+elif page == "🌡️ Weather Impact Analysis":
+    st.title("🌡️ Weather vs. Demand Analysis")
+    st.markdown(
+        "This page combines **EIA Electricity Data** with **Open-Meteo Weather Data** to explore the correlation between temperature and energy consumption."
+    )
+
+    # 1. 获取两份数据
+    eia_df = get_eia_data(api_key)
+    weather_df = get_weather_data()
+
+    if not eia_df.empty and not weather_df.empty:
+        # 2. 数据聚合 (将每小时电力数据聚合为“每日平均”)
+        demand_only = eia_df[eia_df["type-name"] == "Demand"].copy()
+        daily_demand = (
+            demand_only.resample("D", on="period")["value"].mean().reset_index()
+        )
+        daily_demand.rename(
+            columns={"period": "date", "value": "avg_demand_mwh"}, inplace=True
+        )
+
+        # 3. 合并数据集 (Merge)
+        merged_df = pd.merge(daily_demand, weather_df, on="date", how="inner")
+
+        # 4. 双轴图表展示 (Dual-Axis Chart)
+        st.subheader("Temperature & Electricity Demand Trend")
+
+        fig2, ax1 = plt.subplots(figsize=(10, 5))
+
+        # 绘制电力需求 (左轴)
+        color = "tab:blue"
+        ax1.set_xlabel("Date")
+        ax1.set_ylabel("Daily Avg Demand (MWh)", color=color)
+        ax1.plot(
+            merged_df["date"],
+            merged_df["avg_demand_mwh"],
+            color=color,
+            linewidth=2,
+            label="Demand",
+        )
+        ax1.tick_params(axis="y", labelcolor=color)
+
+        # 创建共享 x 轴的右轴
+        ax2 = ax1.twinx()
+        color = "tab:red"
+        ax2.set_ylabel("Avg Temperature (°C)", color=color)
+        ax2.plot(
+            merged_df["date"],
+            merged_df["avg_temp"],
+            color=color,
+            linestyle="--",
+            linewidth=2,
+            label="Temperature",
+        )
+        ax2.tick_params(axis="y", labelcolor=color)
+
+        plt.title("Correlation: Electricity Demand vs. Temperature (Los Angeles)")
+        st.pyplot(fig2)
+
+        # 5. 散点图相关性分析
+        st.subheader("Scatter Plot: Temperature Sensitivity")
+        fig3, ax3 = plt.subplots()
+        ax3.scatter(
+            merged_df["avg_temp"], merged_df["avg_demand_mwh"], alpha=0.6, c="purple"
+        )
+        ax3.set_xlabel("Temperature (°C)")
+        ax3.set_ylabel("Electricity Demand (MWh)")
+        ax3.grid(True, linestyle="--", alpha=0.3)
+        st.pyplot(fig3)
+
+        st.caption("Data Sources: EIA API (Electricity) & Open-Meteo API (Weather)")
+
+    else:
+        st.error("Failed to load data for analysis.")

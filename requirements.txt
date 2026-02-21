@@ -3,5 +3,5 @@ pandas
 python-dotenv
 matplotlib
 python-dotenv
-streamlit
-altair
+streamlit>=1.31
+altair>=5

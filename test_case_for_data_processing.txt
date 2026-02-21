@@ -1,0 +1,58 @@
+📄 Test Plan: merge_daily_demand_weather
+Function Purpose: Filters EIA data to only include "Demand", calculates the daily average, and merges it with daily weather data using an inner join.
+
+🟢 Test Case 1: Happy Path (Standard Valid Data)
+Scenario: The function receives normal hourly EIA data (mix of Actual and Forecast) and normal daily weather data spanning two days.
+
+Input 1 (eia_df): * Jan 1, 10:00 | Demand | 100 MWh
+
+Jan 1, 11:00 | Demand | 200 MWh
+
+Jan 1, 10:00 | Forecast | 999 MWh (Should be filtered out)
+
+Jan 2, 10:00 | Demand | 300 MWh
+
+Jan 2, 11:00 | Demand | 300 MWh
+
+Input 2 (weather_df):
+
+Jan 1 | 15.0 °C
+
+Jan 2 | 20.0 °C
+
+Expected Output: A merged DataFrame with exactly 2 rows:
+
+Row 1: Date: Jan 1 | avg_demand_mwh: 150 | avg_temp: 15.0
+
+Row 2: Date: Jan 2 | avg_demand_mwh: 300 | avg_temp: 20.0
+
+🟡 Test Case 2: Empty Data (API Failure Simulation)
+Scenario: One or both of the APIs failed and returned an empty DataFrame.
+
+Input 1 (eia_df): Empty DataFrame
+
+Input 2 (weather_df): Normal weather data
+
+Expected Output: Empty DataFrame (the function should gracefully exit without crashing Streamlit).
+
+🟡 Test Case 3: Missing "Demand" Data
+Scenario: The EIA API successfully returns data, but for some reason, it only contains forecast data, no actual "Demand".
+
+Input 1 (eia_df):
+
+Jan 1, 10:00 | Forecast | 500 MWh
+
+Jan 1, 11:00 | Forecast | 550 MWh
+
+Input 2 (weather_df): Normal weather data
+
+Expected Output: Empty DataFrame. (The filter step type-name == "Demand" will leave an empty table, so the final merge should also be empty).
+
+🟡 Test Case 4: Unmatched Dates (Inner Join Test)
+Scenario: The EIA data and Weather data cover different time ranges. Because the function uses how="inner", it should only keep overlapping dates.
+
+Input 1 (eia_df): Data for Jan 1 and Jan 2.
+
+Input 2 (weather_df): Data for Jan 2 and Jan 3.
+
+Expected Output: A merged DataFrame with exactly 1 row (for Jan 2), as that is the only overlapping date. Jan 1 and Jan 3 are dropped.

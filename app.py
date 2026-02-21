@@ -4,6 +4,7 @@ import requests
 import matplotlib.pyplot as plt
 import os
 from dotenv import load_dotenv
+from data_processing import merge_daily_demand_weather
 
 st.set_page_config(page_title="EIA Grid Monitor", page_icon="⚡", layout="wide")
 
@@ -143,17 +144,10 @@ elif page == "🌡️ Weather Impact Analysis":
     eia_df = get_eia_data(api_key)
     weather_df = get_weather_data()
 
-    if not eia_df.empty and not weather_df.empty:
-        demand_only = eia_df[eia_df["type-name"] == "Demand"].copy()
-        daily_demand = (
-            demand_only.resample("D", on="period")["value"].mean().reset_index()
-        )
-        daily_demand.rename(
-            columns={"period": "date", "value": "avg_demand_mwh"}, inplace=True
-        )
+    # [REFACTORED] Data Processing: Filter, Resample, and Merge
+    merged_df = merge_daily_demand_weather(eia_df, weather_df)
 
-        merged_df = pd.merge(daily_demand, weather_df, on="date", how="inner")
-
+    if not merged_df.empty:
         st.subheader("Temperature & Electricity Demand Trend")
 
         fig2, ax1 = plt.subplots(figsize=(10, 5))

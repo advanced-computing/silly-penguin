@@ -1,4 +1,47 @@
-📄 Test Plan: merge_daily_demand_weather
+1. Review of Existing Code
+The current Streamlit script combines multiple responsibilities in a single file:
+1) Configuration / secrets: loading EIA_API_KEY from environment variables or st.secrets.
+2) Network I/O: calling external APIs (EIA, and weather if applicable) via HTTP requests.
+3) Data processing: filtering to actual demand, type conversion, resampling/aggregation to daily averages, pivoting, slicing recent time windows, merging datasets, and computing KPIs.
+4) UI rendering: Streamlit sidebar controls, metrics, charts, and raw table display.
+This structure works for a prototype, but it makes unit testing difficult because UI logic, network calls, and data transformations are tightly coupled.
+
+2. What Can Be Refactored Into Functions
+To improve testability and readability, we extract the core data logic into functions (functions that operate on DataFrames and return DataFrames/values without Streamlit side effects). In particular:
+1) Demand + Weather daily merge (pure data function)
+merge_daily_demand_weather(eia_df, weather_df) -> pd.DataFrame
+- Responsibilities:
+  Filter EIA rows to only "Demand" (exclude forecasts).
+  Convert timestamps to date and compute daily average demand.
+  Merge with daily weather data using an inner join on date.
+2) Grid KPIs computation (pure data function)
+calculate_grid_kpis(df_pivot) -> tuple[last_actual, last_forecast, delta]
+- Responsibilities:
+  Read the latest (first-row) "Demand" and "Day-ahead demand forecast" values.
+  Compute forecast error delta = actual - forecast.
+  Handle empty DataFrames or missing columns gracefully.
+3) Supporting utility functions (optional, also pure)
+  clean_eia_df(df): enforce numeric/datetime types and standardize column names.
+  pivot_hourly_demand_forecast(df): pivot to wide format for plotting and KPI extraction.
+  select_last_n_days(df, days_to_show): slice the most recent time window in hours.
+
+After refactoring, the Streamlit file would primarily orchestrate: load secrets → fetch raw data → call pure functions → render outputs.
+
+3. Where We Can Make the Code DRY?
+Several parts of the script can be made more DRY (Don’t Repeat Yourself) by centralizing repeated logic and “magic strings”:
+
+1) Centralize key column names
+Repeated strings like "Demand" and "Day-ahead demand forecast" should be defined once (constants or default parameters). This prevents bugs from typos and simplifies future changes.
+2) Separate fetch from transform
+Network calls (requests.get) should be separated from transformation logic (filtering, pivoting, aggregating, merging). This reduces duplication and makes data logic independently testable.
+3) Standardize time handling
+Converting period to datetime and extracting date/daily grouping should be done in one shared function instead of scattered across the app.
+4) Graceful empty-data handling
+Instead of repeating checks like if df.empty in multiple places, make functions return empty outputs (or (None, None, None) for KPIs) consistently, and let the UI layer decide how to display warnings.
+5) Reuse computation for metrics
+KPI calculations should be performed in one function (calculate_grid_kpis) rather than inline computations, so both plotting and dashboard metrics rely on the same validated logic.
+
+4. Test Plan: merge_daily_demand_weather
 Function Purpose: Filters EIA data to only include "Demand", calculates the daily average, and merges it with daily weather data using an inner join.
 
 🟢 Test Case 1: Happy Path (Standard Valid Data)

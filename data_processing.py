@@ -21,3 +21,20 @@ def merge_daily_demand_weather(
     merged_df = pd.merge(daily_demand, weather_df, on="date", how="inner")
 
     return merged_df
+
+
+def calculate_grid_kpis(df_pivot):
+    """
+    Extracts the latest Actual Demand, Forecast, and calculates the Delta.
+    Returns (last_actual, last_forecast, delta) or (None, None, None) if data is missing.
+    """
+    if df_pivot.empty:
+        return None, None, None
+
+    try:
+        last_actual = df_pivot["Demand"].iloc[0]
+        last_forecast = df_pivot["Day-ahead demand forecast"].iloc[0]
+        delta = last_actual - last_forecast
+        return last_actual, last_forecast, delta
+    except (KeyError, IndexError):
+        return None, None, None

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import os
 from dotenv import load_dotenv
 from data_processing import merge_daily_demand_weather
+from data_processing import calculate_grid_kpis
 
 st.set_page_config(page_title="EIA Grid Monitor", page_icon="⚡", layout="wide")
 
@@ -104,18 +105,16 @@ if page == "⚡ Real-time Grid Monitor":
         days_to_show = st.sidebar.slider("Days to visualize", 1, 30, 7)
         df_display = df_pivot.head(days_to_show * 24)
 
-        try:
-            last_actual = df_display["Demand"].iloc[0]
-            last_forecast = df_display["Day-ahead demand forecast"].iloc[0]
-            delta = last_actual - last_forecast
+        last_actual, last_forecast, delta = calculate_grid_kpis(df_display)
 
+        if last_actual is not None:
             col1, col2, col3 = st.columns(3)
             col1.metric("Latest Actual Demand", f"{last_actual:,.0f} MWh")
             col2.metric("Latest Forecast", f"{last_forecast:,.0f} MWh")
             col3.metric(
                 "Forecast Error (Delta)", f"{delta:,.0f} MWh", delta_color="inverse"
             )
-        except KeyError:
+        else:
             st.warning("Data incomplete for KPI calculation.")
 
         st.subheader(f"Demand vs. Forecast (Last {days_to_show} Days)")

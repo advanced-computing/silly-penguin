@@ -56,3 +56,32 @@ Input 1 (eia_df): Data for Jan 1 and Jan 2.
 Input 2 (weather_df): Data for Jan 2 and Jan 3.
 
 Expected Output: A merged DataFrame with exactly 1 row (for Jan 2), as that is the only overlapping date. Jan 1 and Jan 3 are dropped.
+
+
+📄 Test Plan: calculate_grid_kpis
+Function Purpose: Extracts the latest actual demand and forecast values from a pivoted DataFrame and calculates the forecast error (delta).
+
+🟢 Test Case 1: Happy Path (Standard Valid Data)
+Scenario: The function receives a properly formatted DataFrame with both "Demand" and "Day-ahead demand forecast" columns, sorted with the latest data in the first row.
+
+Input (df_pivot): * Row 1 (Latest): Demand = 5000 | Day-ahead demand forecast = 4800
+
+Row 2: Demand = 4900 | Day-ahead demand forecast = 4950
+
+Expected Output: (5000, 4800, 200) (Calculation: 5000 - 4800 = 200)
+
+🟡 Test Case 2: Edge Case - Missing Column
+Scenario: The API returns incomplete data, resulting in a DataFrame that is missing the "Day-ahead demand forecast" column.
+
+Input (df_pivot):
+
+Row 1: Demand = 5000 | (No forecast column exists)
+
+Expected Output: (None, None, None) (The function should catch the KeyError and fail gracefully without crashing the app).
+
+🟡 Test Case 3: Edge Case - Empty DataFrame
+Scenario: The function receives a completely empty DataFrame (e.g., due to an API failure upstream or aggressive filtering).
+
+Input (df_pivot): pd.DataFrame() (0 rows, 0 columns)
+
+Expected Output: (None, None, None) (The function should catch the IndexError or check for emptiness and return None values).

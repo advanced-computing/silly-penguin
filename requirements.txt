@@ -7,3 +7,4 @@ streamlit>=1.31
 altair>=5
 pytest
 pytest-cov
+ruff

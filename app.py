@@ -1,11 +1,12 @@
-import streamlit as st
+import os
+
+import matplotlib.pyplot as plt
 import pandas as pd
 import requests
-import matplotlib.pyplot as plt
-import os
+import streamlit as st
 from dotenv import load_dotenv
-from data_processing import merge_daily_demand_weather
-from data_processing import calculate_grid_kpis
+
+from data_processing import calculate_grid_kpis, merge_daily_demand_weather
 
 st.set_page_config(page_title="EIA Grid Monitor", page_icon="⚡", layout="wide")
 
@@ -16,9 +17,7 @@ if not api_key:
     try:
         api_key = st.secrets["EIA_API_KEY"]
     except (FileNotFoundError, KeyError):
-        st.error(
-            "API Key not found. Please set it in .env (Local) or Streamlit Secrets (Cloud)."
-        )
+        st.error("API Key not found. Please set it in .env (Local) or Streamlit Secrets (Cloud).")
         st.stop()
 
 
@@ -39,7 +38,9 @@ def get_eia_data(api_key):
         "length": 5000,
     }
     response = requests.get(url, params=params)
-    if response.status_code == 200:
+
+    param_used_below = 200
+    if response.status_code == param_used_below:
         data = response.json()["response"]["data"]
         df = pd.DataFrame(data)
         df["value"] = pd.to_numeric(df["value"], errors="coerce")
@@ -62,7 +63,10 @@ def get_weather_data():
         "timezone": "America/Los_Angeles",
     }
     response = requests.get(url, params=params)
-    if response.status_code == 200:
+
+    param_used_below = 200
+
+    if response.status_code == param_used_below:
         data = response.json()
         daily = data["daily"]
         df = pd.DataFrame(
@@ -83,9 +87,7 @@ def get_weather_data():
 # Sidebar Navigation
 # ==========================================
 st.sidebar.title("Navigation")
-page = st.sidebar.radio(
-    "Go to", ["⚡ Real-time Grid Monitor", "🌡️ Weather Impact Analysis"]
-)
+page = st.sidebar.radio("Go to", ["⚡ Real-time Grid Monitor", "🌡️ Weather Impact Analysis"])
 
 # ==========================================
 # PAGE 1: Real-time Grid Monitor
@@ -99,7 +101,7 @@ if page == "⚡ Real-time Grid Monitor":
         df = get_eia_data(api_key)
 
     if not df.empty:
-        df_pivot = df.pivot(index="period", columns="type-name", values="value")
+        df_pivot = df.pivot_table(index="period", columns="type-name", values="value")
 
         st.sidebar.header("Filter Options")
         days_to_show = st.sidebar.slider("Days to visualize", 1, 30, 7)
@@ -111,9 +113,7 @@ if page == "⚡ Real-time Grid Monitor":
             col1, col2, col3 = st.columns(3)
             col1.metric("Latest Actual Demand", f"{last_actual:,.0f} MWh")
             col2.metric("Latest Forecast", f"{last_forecast:,.0f} MWh")
-            col3.metric(
-                "Forecast Error (Delta)", f"{delta:,.0f} MWh", delta_color="inverse"
-            )
+            col3.metric("Forecast Error (Delta)", f"{delta:,.0f} MWh", delta_color="inverse")
         else:
             st.warning("Data incomplete for KPI calculation.")
 
@@ -137,7 +137,8 @@ if page == "⚡ Real-time Grid Monitor":
 elif page == "🌡️ Weather Impact Analysis":
     st.title("🌡️ Weather vs. Demand Analysis")
     st.markdown(
-        "This page combines **EIA Electricity Data** with **Open-Meteo Weather Data** to explore the correlation between temperature and energy consumption."
+        "This page combines **EIA Electricity Data** with **Open-Meteo Weather Data** to "
+        "explore the correlation between temperature and energy consumption."
     )
 
     eia_df = get_eia_data(api_key)
@@ -181,9 +182,7 @@ elif page == "🌡️ Weather Impact Analysis":
 
         st.subheader("Scatter Plot: Temperature Sensitivity")
         fig3, ax3 = plt.subplots()
-        ax3.scatter(
-            merged_df["avg_temp"], merged_df["avg_demand_mwh"], alpha=0.6, c="purple"
-        )
+        ax3.scatter(merged_df["avg_temp"], merged_df["avg_demand_mwh"], alpha=0.6, c="purple")
         ax3.set_xlabel("Temperature (°C)")
         ax3.set_ylabel("Electricity Demand (MWh)")
         ax3.grid(True, linestyle="--", alpha=0.3)

@@ -1,0 +1,24 @@
+# https://coverage.readthedocs.io/en/latest/config.html
+[tool.coverage.run]
+# some workarounds for source and test files being intermingled, not all using modules, etc.
+source = ["examples/", "examples/flask/", "tests/"]
+
+## ruff stuff ##
+# https://docs.astral.sh/ruff/settings/
+[tool.ruff]
+line-length = 100
+[tool.ruff.lint]
+# https://docs.astral.sh/ruff/rules/
+extend-select = [
+  "B",   # flake8-bugbear (common bugs)
+  "C90", # McCabe complexity
+  "E",   # pycodestyle errors
+  "F",   # Pyflakes (basic errors)
+  "I",   # isort (import sorting)
+  "N",   # pep8-naming
+  "PD",  # pandas-vet
+  "PLR", # Pylint refactor (function/module length, complexity)
+  "SIM", # flake8-simplify
+  "UP",  # pyupgrade (modern Python)
+  "W",   # pycodestyle warnings
+]

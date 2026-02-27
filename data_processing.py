@@ -10,7 +10,7 @@ def merge_daily_demand_weather(
     demand_only = daily_demand[daily_demand["type-name"] == "Demand"]
 
     avg_demand = demand_only.groupby("date")["value"].mean().reset_index()
-    avg_demand.rename(columns={"value": "avg_demand_mwh"})
+    avg_demand = avg_demand.rename(columns={"value": "avg_demand_mwh"})
 
     merged_df = avg_demand.merge(weather_df, on="date", how="inner")
 

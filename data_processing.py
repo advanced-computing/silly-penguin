@@ -1,9 +1,7 @@
 import pandas as pd
 
 
-def merge_daily_demand_weather(
-    eia_df: pd.DataFrame, weather_df: pd.DataFrame
-) -> pd.DataFrame:
+def merge_daily_demand_weather(eia_df: pd.DataFrame, weather_df: pd.DataFrame) -> pd.DataFrame:
     """Filters EIA data to actual demand, resamples to daily average, and merges with weather."""
     if eia_df.empty or weather_df.empty:
         return pd.DataFrame()
@@ -13,12 +11,10 @@ def merge_daily_demand_weather(
 
     # Resample to daily average
     daily_demand = demand_only.resample("D", on="period")["value"].mean().reset_index()
-    daily_demand.rename(
-        columns={"period": "date", "value": "avg_demand_mwh"}, inplace=True
-    )
+    daily_demand.rename(columns={"period": "date", "value": "avg_demand_mwh"})
 
     # Merge with weather data
-    merged_df = pd.merge(daily_demand, weather_df, on="date", how="inner")
+    merged_df = daily_demand.merge(weather_df, on="date", how="inner")
 
     return merged_df
 

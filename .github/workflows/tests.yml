@@ -17,8 +17,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run tests
-        # https://pytest-cov.readthedocs.io/en/latest/readme.html
-        run: pytest --cov
+        run: |
+           PYTHONPATH=. python -m pytest --cov
 
       # https://github.com/astral-sh/ruff-action
       - name: Set up ruff

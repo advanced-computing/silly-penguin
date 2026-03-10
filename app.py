@@ -205,6 +205,23 @@ elif page == "📄 Project Proposal":
     st.title("Project Proposal")
     st.subheader("Electricity Demand Forecasting and Grid Stress Analysis")
 
+    st.header("0. Proposal Updates After Initial Implementation")
+
+    st.write("""
+    After implementing the first version of the Streamlit dashboard,
+    we refined the project focus.
+
+    Originally the proposal included several broad research questions.
+    After exploring the data, we narrowed the scope to focus on:
+
+    1. Forecast error in electricity demand prediction
+    2. The relationship between grid stress and interregional electricity interchange
+
+    We also decided to add a **map-based visualization**
+    to allow users to explore regional differences
+    in prediction accuracy and grid reliance.
+    """)
+
     st.header("1. Dataset")
 
     st.write("""
@@ -296,21 +313,4 @@ elif page == "📄 Project Proposal":
     3. **Map Dashboard (planned)**
        - Regional prediction error
        - Interchange dependence
-    """)
-
-    st.header("7. Proposal Updates After Initial Implementation")
-
-    st.write("""
-    After implementing the first version of the Streamlit dashboard,
-    we refined the project focus.
-
-    Originally the proposal included several broad research questions.
-    After exploring the data, we narrowed the scope to focus on:
-
-    1. Forecast error in electricity demand prediction
-    2. The relationship between grid stress and interregional electricity interchange
-
-    We also decided to add a **map-based visualization**
-    to allow users to explore regional differences
-    in prediction accuracy and grid reliance.
     """)

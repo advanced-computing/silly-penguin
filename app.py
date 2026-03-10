@@ -7,7 +7,9 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 
-from data_processing import calculate_grid_kpis, merge_daily_demand_weather
+from data_processing import calculate_grid_kpis
+
+HTTP_OK = 200
 
 st.set_page_config(page_title="EIA Grid Monitor", page_icon="⚡", layout="wide")
 
@@ -46,7 +48,7 @@ def get_eia_data(api_key):
     }
     response = requests.get(url, params=params, timeout=30)
 
-    if response.status_code == 200:
+    if response.status_code == HTTP_OK:
         data = response.json()["response"]["data"]
         df = pd.DataFrame(data)
         df["value"] = pd.to_numeric(df["value"], errors="coerce")
@@ -69,7 +71,7 @@ def get_weather_data():
     }
     response = requests.get(url, params=params, timeout=30)
 
-    if response.status_code == 200:
+    if response.status_code == HTTP_OK:
         data = response.json()
         daily = data["daily"]
         df = pd.DataFrame(
@@ -400,7 +402,8 @@ elif page == "🌡️ Weather Impact Analysis":
         st.dataframe(regime_summary)
 
         st.caption(
-            "This table compares demand and forecast performance across hot, cold, and mild weather conditions."
+            "This table compares demand and forecast performance across hot, cold, "
+            "and mild weather conditions."
         )
 
         with st.expander("See Daily Weather-Merged Data"):
@@ -475,13 +478,10 @@ elif page == "📄 Project Proposal":
         """
         After implementing the first version of the Streamlit dashboard,
         we refined the project focus.
-
         Originally the proposal included several broad research questions.
         After exploring the data, we narrowed the scope to focus on:
-
-        1. Forecast error in electricity demand prediction  
+        1. Forecast error in electricity demand prediction
         2. The relationship between grid stress and interregional electricity interchange
-
         We also decided to add a **map-based visualization**
         to allow users to explore regional differences
         in prediction accuracy and grid reliance.

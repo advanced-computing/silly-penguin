@@ -87,7 +87,9 @@ def get_weather_data():
 # Sidebar Navigation
 # ==========================================
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to", ["⚡ Real-time Grid Monitor", "🌡️ Weather Impact Analysis"])
+page = st.sidebar.radio(
+    "Go to", ["⚡ Real-time Grid Monitor", "🌡️ Weather Impact Analysis", "📄 Project Proposal"]
+)
 
 # ==========================================
 # PAGE 1: Real-time Grid Monitor
@@ -192,3 +194,123 @@ elif page == "🌡️ Weather Impact Analysis":
 
     else:
         st.error("Failed to load data for analysis.")
+
+# ==========================================
+# PAGE 3: Project Proposal
+# ==========================================
+
+elif page == "📄 Project Proposal":
+    st.markdown("---")
+    st.caption("Course Project | Advanced Computing for Policy")
+    st.title("Project Proposal")
+    st.subheader("Electricity Demand Forecasting and Grid Stress Analysis")
+
+    st.header("1. Dataset")
+
+    st.write("""
+    **Dataset Name:** Balancing Authority Areas Hourly Operating Data
+
+    **Source:** U.S. Energy Information Administration (EIA)
+
+    This dataset provides hourly electricity system data across more than 50
+    U.S. balancing authorities, including:
+
+    - Actual electricity demand
+    - Day-ahead demand forecasts
+    - Net electricity generation
+    - Power interchange between regions
+
+    The data is updated hourly and is accessible through the EIA API.
+    """)
+
+    st.header("2. Research Questions")
+
+    st.write("""
+    Our project investigates electricity demand forecasting and grid stress.
+
+    **Main Questions:**
+
+    1. How does the forecast error between day-ahead demand forecasts and
+       actual electricity demand change during extreme temperature periods?
+
+    2. Do balancing authorities rely more heavily on interregional
+       electricity interchange during periods of high demand or
+       large prediction errors?
+
+    3. Are there systematic differences in prediction accuracy
+       across balancing authorities?
+    """)
+
+    st.header("3. Target Visualizations")
+
+    st.write("""
+    The project will produce several visualizations:
+
+    - Time-series line chart comparing **forecasted vs actual demand**
+    - Temperature vs electricity demand analysis
+    - Forecast error trends over time
+    - Scatter plots of temperature vs demand
+    - Map visualization of balancing authorities
+    showing prediction error and interchange reliance
+    """)
+
+    st.header("4. Known Unknowns")
+
+    st.write("""
+    Some uncertainties remain in the dataset:
+
+    - Not all balancing authorities may report generation breakdown
+      consistently across the full time period.
+
+    - Electricity demand can be influenced by factors not captured in the data,
+      such as local holidays, outages, or policy changes.
+
+    - Weather data is approximated using representative cities
+      rather than full regional weather systems.
+    """)
+
+    st.header("5. Anticipated Challenges")
+
+    st.write("""
+    Several technical challenges are expected:
+
+    - Aligning timestamps across multiple regions and datasets
+    - Managing large volumes of hourly electricity data
+    - Integrating weather data with electricity demand data
+    - Designing visualizations that clearly communicate grid stress
+    """)
+
+    st.header("6. Proposed Dashboard")
+
+    st.write("""
+    The final Streamlit dashboard will contain:
+
+    1. **Real-time Grid Monitor**
+       - Forecast vs actual demand
+       - Demand trends
+
+    2. **Weather Impact Analysis**
+       - Temperature vs demand
+       - Forecast error analysis
+
+    3. **Map Dashboard (planned)**
+       - Regional prediction error
+       - Interchange dependence
+    """)
+
+    st.header("7. Proposal Updates After Initial Implementation")
+
+    st.write("""
+    After implementing the first version of the Streamlit dashboard,
+    we refined the project focus.
+
+    Originally the proposal included several broad research questions.
+    After exploring the data, we narrowed the scope to focus on:
+
+    1. Forecast error in electricity demand prediction
+    2. The relationship between grid stress and interregional electricity interchange
+
+    We also decided to add a **map-based visualization**
+    to allow users to explore regional differences
+    in prediction accuracy and grid reliance.
+    """)

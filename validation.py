@@ -108,15 +108,9 @@ ng_price_schema = DataFrameSchema(
 weather_schema = DataFrameSchema(
     {
         "date": Column(pa.DateTime, nullable=False),
-        "max_temp": Column(
-            pa.Float, nullable=False, checks=Check.between(TEMP_MIN_C, TEMP_MAX_C)
-        ),
-        "min_temp": Column(
-            pa.Float, nullable=False, checks=Check.between(TEMP_MIN_C, TEMP_MAX_C)
-        ),
-        "avg_temp": Column(
-            pa.Float, nullable=False, checks=Check.between(TEMP_MIN_C, TEMP_MAX_C)
-        ),
+        "max_temp": Column(pa.Float, nullable=False, checks=Check.between(TEMP_MIN_C, TEMP_MAX_C)),
+        "min_temp": Column(pa.Float, nullable=False, checks=Check.between(TEMP_MIN_C, TEMP_MAX_C)),
+        "avg_temp": Column(pa.Float, nullable=False, checks=Check.between(TEMP_MIN_C, TEMP_MAX_C)),
         "ba": Column(pa.String, nullable=False),
     },
     strict=False,

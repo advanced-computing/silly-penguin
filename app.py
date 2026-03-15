@@ -58,6 +58,7 @@ def _get_bq_credentials():
     """Build credentials from Streamlit secrets or fall back to ADC."""
     try:
         from google.oauth2 import service_account
+
         return service_account.Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
             scopes=["https://www.googleapis.com/auth/bigquery"],
@@ -72,8 +73,16 @@ _bq_creds = _get_bq_credentials()
 # BA Constants
 # ==========================================
 MAJOR_BA = [
-    "CISO", "ERCO", "PJM", "MISO", "NYIS",
-    "ISNE", "SWPP", "SOCO", "TVA", "BPAT",
+    "CISO",
+    "ERCO",
+    "PJM",
+    "MISO",
+    "NYIS",
+    "ISNE",
+    "SWPP",
+    "SOCO",
+    "TVA",
+    "BPAT",
 ]
 
 BA_NAMES = {
@@ -108,6 +117,7 @@ FUEL_LABELS = {
 def load_demand_data():
     """Read demand data from BigQuery."""
     import pandas_gbq
+
     query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.hourly_demand`"
     df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
@@ -119,6 +129,7 @@ def load_demand_data():
 def load_interchange_data():
     """Read interchange data from BigQuery."""
     import pandas_gbq
+
     query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.hourly_interchange`"
     df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
@@ -130,6 +141,7 @@ def load_interchange_data():
 def load_fuel_type_data():
     """Read fuel type data from BigQuery."""
     import pandas_gbq
+
     query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.hourly_fuel_type`"
     df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
@@ -141,6 +153,7 @@ def load_fuel_type_data():
 def load_ng_prices():
     """Read natural gas prices from BigQuery."""
     import pandas_gbq
+
     query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.daily_ng_price`"
     df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
     if "ng_price" in df.columns:
@@ -154,6 +167,7 @@ def load_ng_prices():
 def load_weather():
     """Read weather data from BigQuery."""
     import pandas_gbq
+
     query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.daily_weather`"
     df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
     if "date" in df.columns:
@@ -250,9 +264,7 @@ if page == "📊 Executive Overview":
         ba_fuel = fuel_df[fuel_df["respondent"] == selected_ba]
         if not ba_fuel.empty:
             total = ba_fuel["value"].sum()
-            renew = ba_fuel[
-                ba_fuel["fueltype"].isin(["SUN", "WND", "WAT"])
-            ]["value"].sum()
+            renew = ba_fuel[ba_fuel["fueltype"].isin(["SUN", "WND", "WAT"])]["value"].sum()
             if total > 0:
                 share = (renew / total) * 100
                 col4.metric("Renewable Share", f"{share:.1f}%")
@@ -353,18 +365,22 @@ elif page == "🎯 Forecast Uncertainty":
 
             if {"Demand", "Day-ahead demand forecast"}.issubset(df_display.columns):
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=df_display.index,
-                    y=df_display["Demand"],
-                    name="Actual Demand",
-                    line={"color": "#2196F3", "width": 2},
-                ))
-                fig.add_trace(go.Scatter(
-                    x=df_display.index,
-                    y=df_display["Day-ahead demand forecast"],
-                    name="Day-ahead Forecast",
-                    line={"color": "#FF9800", "width": 2, "dash": "dash"},
-                ))
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_display.index,
+                        y=df_display["Demand"],
+                        name="Actual Demand",
+                        line={"color": "#2196F3", "width": 2},
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_display.index,
+                        y=df_display["Day-ahead demand forecast"],
+                        name="Day-ahead Forecast",
+                        line={"color": "#FF9800", "width": 2, "dash": "dash"},
+                    )
+                )
                 fig.update_layout(
                     height=450,
                     xaxis_title="Time",
@@ -378,20 +394,24 @@ elif page == "🎯 Forecast Uncertainty":
             if "Forecast Error" in df_display.columns:
                 st.subheader("Forecast Error Trend")
                 fig2 = go.Figure()
-                fig2.add_trace(go.Scatter(
-                    x=df_display.index,
-                    y=df_display["Forecast Error"],
-                    name="Hourly Error",
-                    line={"color": "#E91E63", "width": 1},
-                    opacity=0.6,
-                ))
-                if "Error 24h MA" in df_display.columns:
-                    fig2.add_trace(go.Scatter(
+                fig2.add_trace(
+                    go.Scatter(
                         x=df_display.index,
-                        y=df_display["Error 24h MA"],
-                        name="24h Moving Average",
-                        line={"color": "#4CAF50", "width": 2.5},
-                    ))
+                        y=df_display["Forecast Error"],
+                        name="Hourly Error",
+                        line={"color": "#E91E63", "width": 1},
+                        opacity=0.6,
+                    )
+                )
+                if "Error 24h MA" in df_display.columns:
+                    fig2.add_trace(
+                        go.Scatter(
+                            x=df_display.index,
+                            y=df_display["Error 24h MA"],
+                            name="24h Moving Average",
+                            line={"color": "#4CAF50", "width": 2.5},
+                        )
+                    )
                 fig2.add_hline(y=0, line_dash="dot", line_color="gray")
                 fig2.update_layout(
                     height=400,
@@ -507,14 +527,16 @@ elif page == "🔄 System Flexibility":
         if not net_int.empty:
             recent = net_int.tail(days_to_show * 24)
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=recent["period"],
-                y=recent["net_interchange_mwh"],
-                fill="tozeroy",
-                name="Net Interchange",
-                line={"color": "#00BCD4", "width": 1.5},
-                fillcolor="rgba(0, 188, 212, 0.2)",
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=recent["period"],
+                    y=recent["net_interchange_mwh"],
+                    fill="tozeroy",
+                    name="Net Interchange",
+                    line={"color": "#00BCD4", "width": 1.5},
+                    fillcolor="rgba(0, 188, 212, 0.2)",
+                )
+            )
             fig.add_hline(y=0, line_dash="dot", line_color="gray")
             fig.update_layout(
                 height=450,
@@ -530,26 +552,32 @@ elif page == "🔄 System Flexibility":
         daily_int = compute_daily_interchange(interchange_df, selected_ba)
         if not daily_int.empty:
             fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(
-                x=daily_int["date"],
-                y=daily_int["avg_interchange"],
-                name="Daily Average",
-                line={"color": "#00BCD4", "width": 2},
-            ))
-            fig2.add_trace(go.Scatter(
-                x=daily_int["date"],
-                y=daily_int["max_interchange"],
-                name="Daily Max",
-                line={"color": "#FF5722", "width": 1, "dash": "dot"},
-                opacity=0.5,
-            ))
-            fig2.add_trace(go.Scatter(
-                x=daily_int["date"],
-                y=daily_int["min_interchange"],
-                name="Daily Min",
-                line={"color": "#4CAF50", "width": 1, "dash": "dot"},
-                opacity=0.5,
-            ))
+            fig2.add_trace(
+                go.Scatter(
+                    x=daily_int["date"],
+                    y=daily_int["avg_interchange"],
+                    name="Daily Average",
+                    line={"color": "#00BCD4", "width": 2},
+                )
+            )
+            fig2.add_trace(
+                go.Scatter(
+                    x=daily_int["date"],
+                    y=daily_int["max_interchange"],
+                    name="Daily Max",
+                    line={"color": "#FF5722", "width": 1, "dash": "dot"},
+                    opacity=0.5,
+                )
+            )
+            fig2.add_trace(
+                go.Scatter(
+                    x=daily_int["date"],
+                    y=daily_int["min_interchange"],
+                    name="Daily Min",
+                    line={"color": "#4CAF50", "width": 1, "dash": "dot"},
+                    opacity=0.5,
+                )
+            )
             fig2.add_hline(y=0, line_dash="dot", line_color="gray")
             fig2.update_layout(
                 height=400,
@@ -565,9 +593,7 @@ elif page == "🔄 System Flexibility":
         # Hourly pattern
         with int_detail_cols[0]:
             st.subheader("Hourly Interchange Pattern")
-            hourly_pat = compute_hourly_interchange_pattern(
-                interchange_df, selected_ba
-            )
+            hourly_pat = compute_hourly_interchange_pattern(interchange_df, selected_ba)
             if not hourly_pat.empty:
                 fig3 = px.bar(
                     hourly_pat,
@@ -591,13 +617,10 @@ elif page == "🔄 System Flexibility":
             st.subheader("Demand vs Net Interchange")
             if not demand_df.empty:
                 ba_demand = demand_df[
-                    (demand_df["respondent"] == selected_ba)
-                    & (demand_df["type-name"] == "Demand")
+                    (demand_df["respondent"] == selected_ba) & (demand_df["type-name"] == "Demand")
                 ].copy()
                 if not ba_demand.empty and not net_int.empty:
-                    scatter_data = ba_demand.merge(
-                        net_int, on="period", how="inner"
-                    )
+                    scatter_data = ba_demand.merge(net_int, on="period", how="inner")
                     if not scatter_data.empty:
                         fig4 = px.scatter(
                             scatter_data,
@@ -699,9 +722,7 @@ elif page == "⛽ Fuel Substitution":
         # NG price vs generation
         st.subheader("Natural Gas Price vs Generation Response")
         if not ng_price_df.empty:
-            price_gen = compute_ng_price_vs_generation(
-                fuel_df, ng_price_df, selected_ba
-            )
+            price_gen = compute_ng_price_vs_generation(fuel_df, ng_price_df, selected_ba)
             if not price_gen.empty:
                 # Dual-axis: NG price + NG generation share
                 ng_data = price_gen[price_gen["fueltype"] == "NG"]
@@ -731,12 +752,8 @@ elif page == "⛽ Fuel Substitution":
                         hovermode="x unified",
                         legend={"orientation": "h", "y": -0.15},
                     )
-                    fig3.update_yaxes(
-                        title_text="Price ($/MMBtu)", secondary_y=False
-                    )
-                    fig3.update_yaxes(
-                        title_text="NG Share (%)", secondary_y=True
-                    )
+                    fig3.update_yaxes(title_text="Price ($/MMBtu)", secondary_y=False)
+                    fig3.update_yaxes(title_text="NG Share (%)", secondary_y=True)
                     st.plotly_chart(fig3, use_container_width=True)
                     st.caption(
                         "When natural gas prices spike, do other fuels "
@@ -847,10 +864,16 @@ elif page == "🗺️ Geographic Dashboard":
         # Summary table
         st.subheader("Regional Summary Table")
         display_cols = [
-            c for c in [
-                "ba", "name", "mape", "avg_demand",
-                "avg_net_interchange", "renewable_share",
-            ] if c in geo_summary.columns
+            c
+            for c in [
+                "ba",
+                "name",
+                "mape",
+                "avg_demand",
+                "avg_net_interchange",
+                "renewable_share",
+            ]
+            if c in geo_summary.columns
         ]
         styled = geo_summary[display_cols].copy()
         st.dataframe(
@@ -928,10 +951,7 @@ elif page == "📄 Research & Methodology":
     )
 
     st.header("Balancing Authorities Covered")
-    ba_table = pd.DataFrame([
-        {"Code": k, "Name": v}
-        for k, v in BA_NAMES.items()
-    ])
+    ba_table = pd.DataFrame([{"Code": k, "Name": v} for k, v in BA_NAMES.items()])
     st.dataframe(ba_table, use_container_width=True, hide_index=True)
 
     st.header("Methodology")

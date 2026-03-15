@@ -198,9 +198,7 @@ def compute_generation_mix(df: pd.DataFrame, ba: str | None = None) -> pd.DataFr
         return pd.DataFrame()
 
     work["date"] = pd.to_datetime(work["period"].dt.date)
-    daily_mix = (
-        work.groupby(["date", "fueltype"])["value"].mean().reset_index()
-    )
+    daily_mix = work.groupby(["date", "fueltype"])["value"].mean().reset_index()
     daily_mix = daily_mix.rename(columns={"value": "avg_generation_mwh"})
     return daily_mix
 

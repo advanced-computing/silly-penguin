@@ -2,12 +2,23 @@ import os
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import pandas_gbq
 import plotly.express as px
 import requests
 import streamlit as st
 from dotenv import load_dotenv
+from google.oauth2 import service_account
 
 from data_processing import calculate_grid_kpis
+
+# --------------------------------------------------
+# BigQuery connection setup
+# --------------------------------------------------
+credentials = service_account.Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=["https://www.googleapis.com/auth/bigquery"],
+)
+GCP_PROJECT = st.secrets["gcp_service_account"]["project_id"]
 
 HTTP_OK = 200
 
@@ -31,31 +42,22 @@ if not api_key:
 # Data Fetching Functions
 # ==========================================
 @st.cache_data(ttl=3600)
-def get_eia_data(api_key):
-    url = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
-    params = {
-        "api_key": api_key,
-        "frequency": "hourly",
-        "data[0]": "value",
-        "facets[respondent][]": "CISO",
-        "facets[type][]": ["D", "DF"],  # D=Actual Demand, DF=Forecast
-        "start": "2025-01-01T00",
-        "end": "2026-02-01T00",
-        "sort[0][column]": "period",
-        "sort[0][direction]": "desc",
-        "offset": 0,
-        "length": 5000,
-    }
-    response = requests.get(url, params=params, timeout=30)
+def get_eia_data():
+    """Read EIA hourly demand data from BigQuery."""
+    query = f"""
+        SELECT *
+        FROM `{GCP_PROJECT}.eia_data.hourly_demand`
+        ORDER BY period DESC
+    """
 
-    if response.status_code == HTTP_OK:
-        data = response.json()["response"]["data"]
-        df = pd.DataFrame(data)
-        df["value"] = pd.to_numeric(df["value"], errors="coerce")
-        df["period"] = pd.to_datetime(df["period"])
-        return df
-    st.error(f"EIA API Error: {response.status_code}")
-    return pd.DataFrame()
+    df = pandas_gbq.read_gbq(
+        query,
+        project_id=GCP_PROJECT,
+        credentials=credentials,
+    )
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df["period"] = pd.to_datetime(df["period"])
+    return df
 
 
 @st.cache_data(ttl=3600)

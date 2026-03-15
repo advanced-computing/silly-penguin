@@ -10,3 +10,5 @@ pytest-cov
 ruff
 pandera
 plotly
+pandas-gbq
+google-auth

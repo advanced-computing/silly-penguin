@@ -1,41 +1,100 @@
-# Project 1 Part 1: Proposal
-Group [silly-penguin](https://github.com/advanced-computing/silly-penguin): Xingyi Wang, Wuhao Xia
+# ⚡ US Grid Monitor
 
-## 1. Dataset
-Name: Balancing Authority Areas hourly operating data
+**How Do Power Systems Respond to Uncertainty and Shocks?**
 
-Link: [EIA Data Browser - Region Data](https://www.eia.gov/opendata/browser/electricity/rto/region-data)
+A Streamlit dashboard analyzing US electricity grid behavior across three dimensions: forecast uncertainty, system flexibility through interregional power trade, and fuel substitution in response to energy price shocks.
 
-This dataset provides hourly demand, day-ahead demand forecasts, net generation, and interchange data across 50+ U.S. balancing authorities. It is updated hourly.
+🔗 **Live App**: [silly-penguin.streamlit.app](https://silly-penguin.streamlit.app)
 
-## 2. Research Questions
-How does the mean absolute percentage error between the "Day-ahead demand forecast" and the "Actual demand" fluctuate during extreme temperature weeks compared to mild weather weeks in certain region, for example the CISO (California) region?
+---
 
-Do balancing authorities differ systematically in their net generation mix and their reliance on power interchange?
+## Research Question
 
-Are balancing authorities with insufficient net generation more reliant on interregional power interchange during peak demand periods?
+Power systems face constant uncertainty — from unpredictable demand swings to volatile fuel prices. This project investigates how the US electricity grid responds, using hourly operational data from the Energy Information Administration (EIA).
 
-## 3. [Notebook Link](https://github.com/advanced-computing/silly-penguin/blob/main/eia_electricity_project.ipynb)
+We analyze **10 major balancing authorities** (CISO, ERCO, PJM, MISO, NYIS, ISNE, SWPP, SOCO, TVA, BPAT) across three dimensions:
 
-## 4. Target Visualization
+| Dimension | Question | Data Source |
+|-----------|----------|-------------|
+| 🎯 **Forecast Uncertainty** | How accurate are day-ahead demand forecasts? When do the largest errors occur? | EIA Region Data (D, DF) |
+| 🔄 **System Flexibility** | Do regions rely more on power imports during high demand? | EIA Interchange Data |
+| ⛽ **Fuel Substitution** | How does the generation mix shift when natural gas prices change? | EIA Fuel Type Data + Henry Hub Prices |
 
-![Time-series line chart comparing forecasted vs. actual load.](https://static.us.edusercontent.com/files/76tHFxrdUKWWM9P8zFtptfYO)
+## Dashboard Pages
 
-Type: Time-series line chart comparing forecasted vs. actual load.
+1. **📊 Executive Overview** — KPI cards, MAPE ranking, interchange trends, generation mix snapshot
+2. **🎯 Forecast Uncertainty** — Forecast vs actual time series, error heatmaps, cross-BA accuracy comparison, temperature sensitivity analysis
+3. **🔄 System Flexibility** — Net interchange trends, hourly import/export patterns, demand-interchange correlation
+4. **⛽ Fuel Substitution** — Generation mix stacked area charts, fuel share trends, natural gas price vs generation response, multi-fuel price elasticity
+5. **🗺️ Geographic Dashboard** — US map visualization of MAPE, demand, interchange, and renewable share by region
+6. **📄 Research & Methodology** — Data sources, methodology, and limitations
 
-Description: The plot displays hourly "Day-ahead demand forecast" against "Actual Demand" for the California (CISO) grid.
+## Data Sources
 
-## 5. Known Unknowns
-It is unknown if all 50+ balancing authorities provide a consistent, uninterrupted stream of "Net Generation" breakdown by fuel type for the entire study period.
+- **EIA Demand & Forecast** — `electricity/rto/region-data` (hourly)
+- **EIA Interchange** — `electricity/rto/interchange-data` (hourly)
+- **EIA Generation by Fuel** — `electricity/rto/fuel-type-data` (hourly)
+- **EIA Natural Gas Price** — `natural-gas/pri/fut` (daily, Henry Hub spot)
+- **Open-Meteo Weather** — Archive API (daily temperature per BA)
 
-The exact degree to which non-economic factors, such as local public holidays or unrecorded micro-grid outages, influence "Actual Demand" values remains unquantified.
+## Project Structure
 
-## 6. Anticipated Challenges
-Since the data spans various regions, aligning all period timestamps to a single standard is critical for accurate cross-regional comparison.
+```
+├── app.py                  # Streamlit dashboard (6 pages)
+├── data_fetching.py        # EIA + weather API fetching
+├── data_processing.py      # Data transformation & metrics
+├── validation.py           # Pandera schemas for all data sources
+├── load_to_bigquery.py     # One-time data loader to BigQuery
+├── requirements.txt
+├── pyproject.toml           # Ruff config
+└── tests/
+    └── test_data_processing.py
+```
 
-Managing and cleaning thousands of rows of hourly data per region can lead to memory bottlenecks in standard Notebook environments.
+## Setup
 
-## 7. Colab Link
-<a target="_blank" href="https://colab.research.google.com/github/advanced-computing/silly-penguin">
-  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
-</a>
+### Prerequisites
+
+- Python 3.11+
+- A [Google Cloud](https://console.cloud.google.com/) project with BigQuery enabled
+- An [EIA API key](https://www.eia.gov/opendata/register.php)
+
+### Installation
+
+```bash
+git clone https://github.com/advanced-computing/silly-penguin.git
+cd silly-penguin
+python -m venv venv
+source venv/bin/activate  # or venv\Scripts\activate on Windows
+pip install -r requirements.txt
+```
+
+### Load Data to BigQuery
+
+```bash
+# Authenticate
+gcloud auth application-default login
+
+# Set your EIA key in .env
+echo 'EIA_API_KEY=your-key-here' > .env
+
+# Run the loader (one-time)
+python load_to_bigquery.py
+```
+
+### Run Locally
+
+```bash
+# Set up .streamlit/secrets.toml with your GCP service account key
+streamlit run app.py
+```
+
+### Deploy
+
+The app reads all data from BigQuery via a service account. Configure secrets in Streamlit Cloud under **Settings → Secrets**.
+
+## Team
+
+**Xingyi Wang & Wuhao Xia** — SIPA, Columbia University
+
+Course: DSPC7160 Advanced Computing for Policy

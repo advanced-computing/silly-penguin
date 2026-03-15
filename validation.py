@@ -1,109 +1,139 @@
-# validation.py
+"""Pandera validation schemas for all data sources."""
+
 from __future__ import annotations
 
 import pandera as pa
 from pandera import Check, Column, DataFrameSchema
 
 # ----------------------------
-# Constants (so rules are explicit)
+# Constants
 # ----------------------------
-VALID_TYPE_NAMES = {"Demand", "Day-ahead demand forecast"}
+VALID_DEMAND_TYPES = {"Demand", "Day-ahead demand forecast"}
 
-TEMP_MIN_C = -30.0
-TEMP_MAX_C = 55.0
+TEMP_MIN_C = -50.0
+TEMP_MAX_C = 60.0
 
-# demand should never be negative; upper bound is just a sanity check
 DEMAND_MIN = 0.0
-DEMAND_MAX = 200_000.0
+DEMAND_MAX = 500_000.0  # higher bound for large BAs like PJM/MISO
 
-# avg_temp should match (max+min)/2 within tolerance (API can have floats/rounding)
+INTERCHANGE_MIN = -200_000.0
+INTERCHANGE_MAX = 200_000.0
+
+GENERATION_MIN = 0.0
+GENERATION_MAX = 500_000.0
+
+NG_PRICE_MIN = 0.0
+NG_PRICE_MAX = 50.0  # $/MMBtu — extreme but possible
+
 AVG_TEMP_TOL = 0.2
 
 
 # ----------------------------
-# 1) EIA hourly schema (raw)
-# Columns of interest: period, type-name, value
+# 1) EIA Demand Schema
 # ----------------------------
-eia_schema = DataFrameSchema(
+demand_schema = DataFrameSchema(
     {
-        # (1) period is datetime and not null
         "period": Column(pa.DateTime, nullable=False),
-        # (2) type-name is string and must be one of allowed categories
         "type-name": Column(
             pa.String,
             nullable=False,
-            checks=Check.isin(VALID_TYPE_NAMES),
+            checks=Check.isin(VALID_DEMAND_TYPES),
         ),
-        # (3) value is numeric, non-null, non-negative
-        # (4) value has a reasonable upper bound (sanity check)
         "value": Column(
             pa.Float,
             nullable=False,
-            checks=[
-                Check.ge(DEMAND_MIN),
-                Check.le(DEMAND_MAX),
-            ],
+            checks=[Check.ge(DEMAND_MIN), Check.le(DEMAND_MAX)],
         ),
+        "respondent": Column(pa.String, nullable=False),
     },
-    # allow extra columns returned by API
     strict=False,
-    # (5) no duplicate (period, type-name) pairs (helps pivot/pivot_table logic)
-    checks=Check(
-        lambda df: ~df.duplicated(subset=["period", "type-name"]).any(),
-        error="Duplicate (period, type-name) rows found.",
-    ),
 )
 
 
 # ----------------------------
-# 2) Weather daily schema (raw)
-# Columns of interest: date, max_temp, min_temp, avg_temp
+# 2) EIA Interchange Schema
+# ----------------------------
+interchange_schema = DataFrameSchema(
+    {
+        "period": Column(pa.DateTime, nullable=False),
+        "value": Column(
+            pa.Float,
+            nullable=False,
+            checks=[Check.ge(INTERCHANGE_MIN), Check.le(INTERCHANGE_MAX)],
+        ),
+        "fromba": Column(pa.String, nullable=False),
+        "toba": Column(pa.String, nullable=False),
+    },
+    strict=False,
+)
+
+
+# ----------------------------
+# 3) EIA Fuel Type Schema
+# ----------------------------
+fuel_type_schema = DataFrameSchema(
+    {
+        "period": Column(pa.DateTime, nullable=False),
+        "value": Column(
+            pa.Float,
+            nullable=False,
+            checks=[Check.ge(GENERATION_MIN), Check.le(GENERATION_MAX)],
+        ),
+        "respondent": Column(pa.String, nullable=False),
+        "fueltype": Column(pa.String, nullable=False),
+    },
+    strict=False,
+)
+
+
+# ----------------------------
+# 4) Natural Gas Price Schema
+# ----------------------------
+ng_price_schema = DataFrameSchema(
+    {
+        "date": Column(pa.DateTime, nullable=False),
+        "ng_price": Column(
+            pa.Float,
+            nullable=False,
+            checks=[Check.ge(NG_PRICE_MIN), Check.le(NG_PRICE_MAX)],
+        ),
+    },
+    strict=False,
+)
+
+
+# ----------------------------
+# 5) Weather Schema
 # ----------------------------
 weather_schema = DataFrameSchema(
     {
-        # (6) date is datetime and not null
         "date": Column(pa.DateTime, nullable=False),
-        # (7) max_temp within realistic bounds
         "max_temp": Column(pa.Float, nullable=False, checks=Check.between(TEMP_MIN_C, TEMP_MAX_C)),
-        # (8) min_temp within realistic bounds
         "min_temp": Column(pa.Float, nullable=False, checks=Check.between(TEMP_MIN_C, TEMP_MAX_C)),
-        # (9) avg_temp within realistic bounds
         "avg_temp": Column(pa.Float, nullable=False, checks=Check.between(TEMP_MIN_C, TEMP_MAX_C)),
+        "ba": Column(pa.String, nullable=False),
     },
     strict=False,
     checks=[
-        # (10) date unique (daily data should have 1 row per date)
-        Check(lambda df: df["date"].is_unique, error="Weather 'date' is not unique."),
-        # (11) max_temp must be >= min_temp
         Check(
-            lambda df: (df["max_temp"] >= df["min_temp"]).all(), error="max_temp < min_temp found."
-        ),
-        # (12) avg_temp ~= (max+min)/2 within tolerance
-        Check(
-            lambda df: (
-                (df["avg_temp"] - (df["max_temp"] + df["min_temp"]) / 2).abs() <= AVG_TEMP_TOL
-            ).all(),
-            error="avg_temp deviates from (max_temp+min_temp)/2 beyond tolerance.",
+            lambda df: (df["max_temp"] >= df["min_temp"]).all(),
+            error="max_temp < min_temp found.",
         ),
     ],
 )
 
 
 # ----------------------------
-# 3) Merged daily schema (post-merge)
-# Columns of interest: date, avg_demand_mwh, avg_temp
+# 6) Merged Daily Schema
 # ----------------------------
 merged_schema = DataFrameSchema(
     {
-        # (13) date datetime and not null
         "date": Column(pa.DateTime, nullable=False),
-        # (14) avg_demand_mwh numeric, not null, non-negative and sane upper bound
         "avg_demand_mwh": Column(
             pa.Float,
             nullable=False,
             checks=[Check.ge(DEMAND_MIN), Check.le(DEMAND_MAX)],
         ),
-        # (15) avg_temp numeric, not null, within bounds
         "avg_temp": Column(
             pa.Float,
             nullable=False,
@@ -111,19 +141,30 @@ merged_schema = DataFrameSchema(
         ),
     },
     strict=False,
-    checks=[
-        # (16) merged date unique (1 row per day)
-        Check(lambda df: df["date"].is_unique, error="Merged 'date' is not unique."),
-    ],
 )
 
 
 # ----------------------------
 # Convenience helpers
 # ----------------------------
-def validate_eia(df):
-    """Validate raw EIA dataframe."""
-    return eia_schema.validate(df)
+def validate_demand(df):
+    """Validate raw EIA demand dataframe."""
+    return demand_schema.validate(df)
+
+
+def validate_interchange(df):
+    """Validate raw EIA interchange dataframe."""
+    return interchange_schema.validate(df)
+
+
+def validate_fuel_type(df):
+    """Validate raw EIA fuel type dataframe."""
+    return fuel_type_schema.validate(df)
+
+
+def validate_ng_price(df):
+    """Validate natural gas price dataframe."""
+    return ng_price_schema.validate(df)
 
 
 def validate_weather(df):

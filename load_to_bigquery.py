@@ -1,14 +1,24 @@
 """
 load_to_bigquery.py
-Pulls EIA hourly demand data and writes it to BigQuery.
+
+Pulls all EIA data sources and writes them to BigQuery.
 Run locally with: python load_to_bigquery.py
+Authenticate first: gcloud auth application-default login
 """
+
+from __future__ import annotations
 
 import os
 
-import pandas as pd
-import requests
 from dotenv import load_dotenv
+
+from data_fetching import (
+    fetch_demand_data,
+    fetch_fuel_type_data,
+    fetch_interchange_data,
+    fetch_natural_gas_prices,
+    fetch_weather_data,
+)
 
 # --------------------------------------------------
 # Config
@@ -16,75 +26,65 @@ from dotenv import load_dotenv
 load_dotenv()
 EIA_API_KEY = os.getenv("EIA_API_KEY")
 
-# Replace with YOUR GCP project ID and dataset
-GCP_PROJECT = "sipa-adv-c-silly-penguin"  # e.g. "grid-monitor-123456"
-BQ_DATASET = "eia_data"  # dataset name in BigQuery
-BQ_TABLE = f"{BQ_DATASET}.hourly_demand"  # dataset.table
-
-HTTP_OK = 200
+GCP_PROJECT = "sipa-adv-c-silly-penguin"
+BQ_DATASET = "eia_data"
 
 
 # --------------------------------------------------
-# 1) Pull data from EIA API
+# Write to BigQuery
 # --------------------------------------------------
-def fetch_eia_data():
-    url = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
-    params = {
-        "api_key": EIA_API_KEY,
-        "frequency": "hourly",
-        "data[0]": "value",
-        "facets[respondent][]": "CISO",
-        "facets[type][]": ["D", "DF"],
-        "start": "2025-01-01T00",
-        "end": "2026-02-01T00",
-        "sort[0][column]": "period",
-        "sort[0][direction]": "desc",
-        "offset": 0,
-        "length": 5000,
-    }
-    response = requests.get(url, params=params, timeout=30)
-
-    if response.status_code != HTTP_OK:
-        raise RuntimeError(f"EIA API returned status {response.status_code}")
-
-    data = response.json()["response"]["data"]
-    df = pd.DataFrame(data)
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    df["period"] = pd.to_datetime(df["period"])
-    return df
-
-
-# --------------------------------------------------
-# 2) Write to BigQuery (creates table if not exists)
-# --------------------------------------------------
-def load_to_bigquery(df):
-    """
-    Uses pandas-gbq to write the DataFrame to BigQuery.
-
-    if_exists options:
-      - "fail"    : raise error if table exists
-      - "replace" : drop + recreate table each run
-      - "append"  : add rows to existing table
-
-    For a regularly-updated source, "replace" is simplest
-    (full refresh each run). Use "append" if you want to
-    accumulate historical data and handle deduplication yourself.
-    """
+def write_to_bq(df, table_name: str) -> None:
+    """Write a DataFrame to BigQuery, replacing existing data."""
+    destination = f"{BQ_DATASET}.{table_name}"
     df.to_gbq(
-        destination_table=BQ_TABLE,
+        destination_table=destination,
         project_id=GCP_PROJECT,
-        if_exists="replace",  # <-- technique: full replace each run
+        if_exists="replace",
     )
-    print(f"✅ Wrote {len(df)} rows to {GCP_PROJECT}.{BQ_TABLE}")
+    print(f"  Wrote {len(df)} rows to {GCP_PROJECT}.{destination}")
 
 
 # --------------------------------------------------
-# 3) Main
+# Main
 # --------------------------------------------------
+def main() -> None:
+    """Fetch all data sources and load to BigQuery."""
+    if not EIA_API_KEY:
+        msg = "EIA_API_KEY not found in environment. Set it in .env file."
+        raise RuntimeError(msg)
+
+    # 1) Demand & Forecast
+    print("1/5  Fetching demand data...")
+    demand_df = fetch_demand_data(EIA_API_KEY)
+    if not demand_df.empty:
+        write_to_bq(demand_df, "hourly_demand")
+
+    # 2) Interchange
+    print("2/5  Fetching interchange data...")
+    interchange_df = fetch_interchange_data(EIA_API_KEY)
+    if not interchange_df.empty:
+        write_to_bq(interchange_df, "hourly_interchange")
+
+    # 3) Generation by Fuel Type
+    print("3/5  Fetching fuel type data...")
+    fuel_df = fetch_fuel_type_data(EIA_API_KEY)
+    if not fuel_df.empty:
+        write_to_bq(fuel_df, "hourly_fuel_type")
+
+    # 4) Natural Gas Prices
+    print("4/5  Fetching natural gas prices...")
+    ng_price_df = fetch_natural_gas_prices(EIA_API_KEY)
+    if not ng_price_df.empty:
+        write_to_bq(ng_price_df, "daily_ng_price")
+
+    # 5) Weather
+    print("5/5  Fetching weather data...")
+    weather_df = fetch_weather_data()
+    if not weather_df.empty:
+        write_to_bq(weather_df, "daily_weather")
+
+    print("All done!")
+
+
 if __name__ == "__main__":
-    print("Fetching EIA data...")
-    df = fetch_eia_data()
-    print(f"Fetched {len(df)} rows.")
-
-    print("Loading to BigQuery...")
-    load_to_bigquery(df)
+    main()

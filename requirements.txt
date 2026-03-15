@@ -2,7 +2,6 @@ requests
 pandas
 python-dotenv
 matplotlib
-python-dotenv
 streamlit>=1.31
 altair>=5
 pytest
@@ -12,3 +11,4 @@ pandera
 plotly
 pandas-gbq
 google-auth
+statsmodels

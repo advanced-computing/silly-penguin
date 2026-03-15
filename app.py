@@ -205,7 +205,7 @@ days_to_show = st.sidebar.slider("Days to visualize", 1, 30, 7)
 # Load Data Once
 # ==========================================
 with st.spinner("Loading electricity and weather data..."):
-    eia_df = get_eia_data(api_key)
+    eia_df = get_eia_data()
     weather_df = get_weather_data()
     df_pivot = prepare_hourly_pivot(eia_df)
     merged_df = prepare_daily_error_weather(eia_df, weather_df)

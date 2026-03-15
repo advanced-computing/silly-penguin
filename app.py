@@ -1,14 +1,12 @@
 import os
 
-import matplotlib.pyplot as plt
 import pandas as pd
+import pandas_gbq
 import plotly.express as px
 import requests
 import streamlit as st
 from dotenv import load_dotenv
-
 from google.oauth2 import service_account
-import pandas_gbq
 
 from data_processing import calculate_grid_kpis
 
@@ -45,11 +43,11 @@ if not api_key:
 @st.cache_data(ttl=3600)
 def get_eia_data():
     """Read EIA hourly demand data from BigQuery."""
-    query = """
+    query = f"""
         SELECT *
-        FROM `{project}.eia_data.hourly_demand`
+        FROM `{GCP_PROJECT}.eia_data.hourly_demand`
         ORDER BY period DESC
-    """.format(project=GCP_PROJECT)
+    """
 
     df = pandas_gbq.read_gbq(
         query,

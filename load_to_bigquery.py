@@ -5,6 +5,7 @@ Run locally with: python load_to_bigquery.py
 """
 
 import os
+
 import pandas as pd
 import requests
 from dotenv import load_dotenv

@@ -4,7 +4,7 @@
 
 A Streamlit dashboard analyzing US electricity grid behavior across three dimensions: forecast uncertainty, system flexibility through interregional power trade, and fuel substitution in response to energy price shocks.
 
-🔗 **Live App**: [silly-penguin.streamlit.app](https://silly-penguin.streamlit.app)
+🔗 **Live App**: [silly-penguin.streamlit.app](https://silly-penguin-hv5ae2e4zodut2mc2oarrh.streamlit.app/)
 
 ---
 

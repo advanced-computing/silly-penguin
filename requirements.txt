@@ -12,3 +12,4 @@ plotly
 pandas-gbq
 google-auth
 google-cloud-bigquery
+numpy

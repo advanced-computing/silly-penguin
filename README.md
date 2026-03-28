@@ -1,8 +1,8 @@
-# ⚡ US Grid Monitor
+# ⚡ Grid Intelligence Platform
 
-**How Do Power Systems Respond to Uncertainty and Shocks?**
+**Open-source power market intelligence dashboard for monitoring US electricity system behavior across major balancing authorities.**
 
-A Streamlit dashboard analyzing US electricity grid behavior across three dimensions: forecast uncertainty, system flexibility through interregional power trade, and fuel substitution in response to energy price shocks.
+A Streamlit dashboard analyzing US electricity grid operations across five practical dimensions: anomaly detection in forecast errors, interchange-based arbitrage signals, renewable investment opportunity scoring, automated compliance summaries, and real-time market overview.
 
 🔗 **Live App**: [silly-penguin.streamlit.app](https://silly-penguin-hv5ae2e4zodut2mc2oarrh.streamlit.app/)
 
@@ -10,46 +10,46 @@ A Streamlit dashboard analyzing US electricity grid behavior across three dimens
 
 ## Research Question
 
-Power systems face constant uncertainty — from unpredictable demand swings to volatile fuel prices. This project investigates how the US electricity grid responds, using hourly operational data from the Energy Information Administration (EIA).
+Power systems operate under constant uncertainty — from fluctuating demand to changing generation portfolios and shifting interregional electricity flows. This project investigates how the US electricity grid behaves under these conditions using operational data from the U.S. Energy Information Administration (EIA), combined with weather data from Open-Meteo.
 
-We analyze **10 major balancing authorities** (CISO, ERCO, PJM, MISO, NYIS, ISNE, SWPP, SOCO, TVA, BPAT) across three dimensions:
+We analyze **10 major balancing authorities** (CISO, ERCO, PJM, MISO, NYIS, ISNE, SWPP, SOCO, TVA, BPAT) across five dimensions:
 
 | Dimension | Question | Data Source |
 |-----------|----------|-------------|
-| 🎯 **Forecast Uncertainty** | How accurate are day-ahead demand forecasts? When do the largest errors occur? | EIA Region Data (D, DF) |
-| 🔄 **System Flexibility** | Do regions rely more on power imports during high demand? | EIA Interchange Data |
-| ⛽ **Fuel Substitution** | How does the generation mix shift when natural gas prices change? | EIA Fuel Type Data + Henry Hub Prices |
+| 🚨 **Anomaly Detection** | Where are demand forecast errors unusually large relative to historical patterns? | EIA Region Data (Demand, Forecast) |
+| 💰 **Arbitrage Signals** | Which BA-to-BA interchange routes show persistent directional flow and low volatility? | EIA Interchange Data |
+| 🌱 **Renewable Investment Scoring** | Which balancing authorities appear most attractive for future renewable investment? | EIA Demand, Interchange, Fuel Type Data |
+| 📋 **Compliance Reports** | How can BA-level operational metrics be summarized in a structured reporting format? | EIA Demand, Forecast, Interchange, Fuel Type Data |
+| 📊 **Market Overview** | What is the latest snapshot of demand, forecast accuracy, interchange, and generation mix? | EIA Region Data, Interchange Data, Fuel Type Data |
 
 ## Dashboard Pages
 
-1. **📊 Executive Overview** — KPI cards, MAPE ranking, interchange trends, generation mix snapshot
-2. **🎯 Forecast Uncertainty** — Forecast vs actual time series, error heatmaps, cross-BA accuracy comparison, temperature sensitivity analysis
-3. **🔄 System Flexibility** — Net interchange trends, hourly import/export patterns, demand-interchange correlation
-4. **⛽ Fuel Substitution** — Generation mix stacked area charts, fuel share trends, natural gas price vs generation response, multi-fuel price elasticity
-5. **🗺️ Geographic Dashboard** — US map visualization of MAPE, demand, interchange, and renewable share by region
-6. **📄 Research & Methodology** — Data sources, methodology, and limitations
+1. **📊 Market Overview** — KPI cards, latest demand and forecast, BA MAPE ranking, demand trends, generation and interchange context  
+2. **🚨 Anomaly Detection** — alert cards, control charts, historical error thresholds, cross-BA distribution comparison  
+3. **💰 Arbitrage Signals** — top interchange routes, consistency scores, hourly heatmaps, selected route profiles  
+4. **🌱 Renewable Investment Scoring** — BA ranking table, composite score breakdown, radar chart, regional map  
+5. **📋 Compliance Reports** — auto-generated BA summaries covering demand, forecast accuracy, interchange, and fuel mix  
 
 ## Data Sources
 
 - **EIA Demand & Forecast** — `electricity/rto/region-data` (hourly)
 - **EIA Interchange** — `electricity/rto/interchange-data` (hourly)
 - **EIA Generation by Fuel** — `electricity/rto/fuel-type-data` (hourly)
-- **EIA Natural Gas Price** — `natural-gas/pri/fut` (daily, Henry Hub spot)
+- **EIA Natural Gas Price** — `natural-gas/pri/fut` (daily, Henry Hub)
 - **Open-Meteo Weather** — Archive API (daily temperature per BA)
 
 ## Project Structure
 
-```
-├── app.py                  # Streamlit dashboard (6 pages)
-├── data_fetching.py        # EIA + weather API fetching
-├── data_processing.py      # Data transformation & metrics
-├── validation.py           # Pandera schemas for all data sources
-├── load_to_bigquery.py     # One-time data loader to BigQuery
+```text
+├── app.py                   # Streamlit dashboard with multi-page interface
+├── data_fetching.py         # EIA and Open-Meteo API fetching functions
+├── data_processing.py       # Data transformation, metrics, scoring, summaries
+├── validation.py            # Pandera schemas for source validation
+├── load_to_bigquery.py      # ETL pipeline to BigQuery
 ├── requirements.txt
 ├── pyproject.toml           # Ruff config
 └── tests/
     └── test_data_processing.py
-```
 
 ## Setup
 
@@ -92,6 +92,13 @@ streamlit run app.py
 ### Deploy
 
 The app reads all data from BigQuery via a service account. Configure secrets in Streamlit Cloud under **Settings → Secrets**.
+
+### Methodology Highlights
+- **Anomaly Detection** uses rolling forecast error monitoring with BA-specific historical percentile thresholds
+- **Arbitrage Signals** score interchange routes based on directional consistency and stability
+- **Renewable Investment Scoring** combines demand growth, renewable headroom, import dependence, and fossil transition opportunity
+- **Compliance Reports** generate structured operational summaries for selected balancing authorities
+- **Market Overview** provides a real-time operational snapshot across key grid indicators
 
 ## Team
 

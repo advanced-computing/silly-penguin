@@ -11,4 +11,4 @@ pandera
 plotly
 pandas-gbq
 google-auth
-statsmodels
+google-cloud-bigquery

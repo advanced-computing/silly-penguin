@@ -13,6 +13,8 @@ Pages:
 
 from __future__ import annotations
 
+import time
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -22,7 +24,6 @@ from plotly.subplots import make_subplots
 from data_processing import (
     build_geographic_summary,
     calculate_grid_kpis,
-    compute_ba_mape_ranking,
     compute_daily_demand_stats,
     compute_daily_interchange,
     compute_error_heatmap_data,
@@ -111,68 +112,78 @@ FUEL_LABELS = {
 
 
 # ==========================================
-# Data Loading from BigQuery (cached)
+# Data Loading: one-time upfront load, then all pages read from memory
 # ==========================================
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_demand_data():
-    """Read demand data from BigQuery."""
-    import pandas_gbq
+def _get_bq_client():
+    """Create a BigQuery client."""
+    from google.cloud import bigquery
 
-    query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.hourly_demand`"
-    df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    if _bq_creds is not None:
+        return bigquery.Client(project=GCP_PROJECT, credentials=_bq_creds)
+    return bigquery.Client(project=GCP_PROJECT)
+
+
+_DS = f"{GCP_PROJECT}.{BQ_DATASET}"
+
+
+@st.cache_resource(show_spinner="Loading data from BigQuery (one-time)...")
+def _load_all_data():
+    """Load all tables once at app startup. Stays in memory across reruns."""
+    client = _get_bq_client()
+
+    def q(sql):
+        return client.query(sql).to_dataframe()
+
+    data = {}
+
+    # Demand (single query, all BAs)
+    df = q(
+        "SELECT period, respondent, `type-name`, CAST(value AS FLOAT64) AS value "
+        f"FROM `{_DS}.hourly_demand`"
+    )
     df["period"] = pd.to_datetime(df["period"])
-    return df
+    data["demand"] = df
 
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_interchange_data():
-    """Read interchange data from BigQuery."""
-    import pandas_gbq
-
-    query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.hourly_interchange`"
-    df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    # Interchange
+    df = q(
+        "SELECT period, fromba, toba, CAST(value AS FLOAT64) AS value "
+        f"FROM `{_DS}.hourly_interchange`"
+    )
     df["period"] = pd.to_datetime(df["period"])
-    return df
+    data["interchange"] = df
 
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_fuel_type_data():
-    """Read fuel type data from BigQuery."""
-    import pandas_gbq
-
-    query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.hourly_fuel_type`"
-    df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    # Fuel type
+    df = q(
+        "SELECT period, respondent, fueltype, CAST(value AS FLOAT64) AS value "
+        f"FROM `{_DS}.hourly_fuel_type`"
+    )
     df["period"] = pd.to_datetime(df["period"])
-    return df
+    data["fuel"] = df
+
+    # NG prices
+    df = q(f"SELECT date, CAST(ng_price AS FLOAT64) AS ng_price FROM `{_DS}.daily_ng_price`")
+    df["date"] = pd.to_datetime(df["date"])
+    data["ng_price"] = df
+
+    # Weather
+    df = q(
+        "SELECT date, ba, "
+        "CAST(avg_temp AS FLOAT64) AS avg_temp, "
+        "CAST(max_temp AS FLOAT64) AS max_temp, "
+        "CAST(min_temp AS FLOAT64) AS min_temp "
+        f"FROM `{_DS}.daily_weather`"
+    )
+    df["date"] = pd.to_datetime(df["date"])
+    data["weather"] = df
+
+    # MAPE ranking (pre-aggregated, tiny)
+    data["ranking"] = q(f"SELECT * FROM `{_DS}.ba_mape_ranking` ORDER BY mape")
+
+    return data
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_ng_prices():
-    """Read natural gas prices from BigQuery."""
-    import pandas_gbq
-
-    query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.daily_ng_price`"
-    df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
-    if "ng_price" in df.columns:
-        df["ng_price"] = pd.to_numeric(df["ng_price"], errors="coerce")
-    if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"])
-    return df
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_weather():
-    """Read weather data from BigQuery."""
-    import pandas_gbq
-
-    query = f"SELECT * FROM `{GCP_PROJECT}.{BQ_DATASET}.daily_weather`"
-    df = pandas_gbq.read_gbq(query, project_id=GCP_PROJECT, credentials=_bq_creds)
-    if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"])
-    return df
+# Load once — persists across all page navigations and reruns
+_data = _load_all_data()
 
 
 # ==========================================
@@ -206,130 +217,80 @@ selected_ba = st.sidebar.selectbox(
 
 
 # ==========================================
-# Load All Data
-# ==========================================
-with st.spinner("Loading data from BigQuery..."):
-    demand_df = load_demand_data()
-    interchange_df = load_interchange_data()
-    fuel_df = load_fuel_type_data()
-    ng_price_df = load_ng_prices()
-    weather_df = load_weather()
-
-
-# ==========================================
 # PAGE 1: Executive Overview
 # ==========================================
 if page == "📊 Executive Overview":
-    st.title("📊 Executive Overview")
+    start_time = time.time()
+    st.title("📊 US Grid Monitor")
     st.markdown(
         """
-        This dashboard analyzes **how US power systems respond to uncertainty and shocks**
-        across three dimensions: forecast uncertainty, system flexibility through
-        interregional power trade, and fuel substitution in response to energy price shocks.
+        ### How Do Power Systems Respond to Uncertainty and Shocks?
+
+        This dashboard analyzes US electricity grid behavior across **10 major
+        balancing authorities** using hourly data from the Energy Information
+        Administration (EIA). Explore three dimensions of grid resilience:
         """
     )
 
-    # --- KPI Row ---
-    st.subheader("System Snapshot")
+    st.markdown("---")
 
-    col1, col2, col3, col4 = st.columns(4)
+    dim_cols = st.columns(3)
+    with dim_cols[0]:
+        st.markdown(
+            """
+            #### 🎯 Forecast Uncertainty
+            How accurate are day-ahead demand forecasts?
+            When and where do the largest errors occur?
 
-    # Total demand KPI
-    if not demand_df.empty:
-        pivot = prepare_demand_pivot(demand_df, selected_ba)
-        actual, forecast, delta = calculate_grid_kpis(pivot)
-        if actual is not None:
-            col1.metric(
-                f"{selected_ba} Latest Demand",
-                f"{actual:,.0f} MWh",
-            )
-            col2.metric(
-                "Forecast Error",
-                f"{delta:,.0f} MWh",
-                delta_color="inverse",
-            )
+            → Select **Forecast Uncertainty** in the sidebar
+            """
+        )
+    with dim_cols[1]:
+        st.markdown(
+            """
+            #### 🔄 System Flexibility
+            Do regions rely more on power imports during
+            high-demand periods? What are the intra-day patterns?
 
-    # Interchange KPI
-    if not interchange_df.empty and "fromba" in interchange_df.columns:
-        ba_int = interchange_df[interchange_df["fromba"] == selected_ba]
-        if not ba_int.empty:
-            latest_int = ba_int.sort_values("period").iloc[-1]["value"]
-            col3.metric(
-                f"{selected_ba} Net Interchange",
-                f"{latest_int:,.0f} MWh",
-            )
+            → Select **System Flexibility** in the sidebar
+            """
+        )
+    with dim_cols[2]:
+        st.markdown(
+            """
+            #### ⛽ Fuel Substitution
+            How does the generation mix shift when natural gas
+            prices change? Which fuels serve as substitutes?
 
-    # Renewable share KPI
-    if not fuel_df.empty and "fueltype" in fuel_df.columns:
-        ba_fuel = fuel_df[fuel_df["respondent"] == selected_ba]
-        if not ba_fuel.empty:
-            total = ba_fuel["value"].sum()
-            renew = ba_fuel[ba_fuel["fueltype"].isin(["SUN", "WND", "WAT"])]["value"].sum()
-            if total > 0:
-                share = (renew / total) * 100
-                col4.metric("Renewable Share", f"{share:.1f}%")
+            → Select **Fuel Substitution** in the sidebar
+            """
+        )
 
     st.markdown("---")
 
-    # --- Three-panel sparkline overview ---
-    overview_cols = st.columns(3)
+    st.subheader("Balancing Authorities Covered")
+    ba_table = pd.DataFrame([{"Code": k, "Name": v} for k, v in BA_NAMES.items()])
+    st.dataframe(ba_table, use_container_width=True, hide_index=True)
 
-    with overview_cols[0]:
-        st.markdown("#### 🎯 Forecast Accuracy")
-        if not demand_df.empty:
-            ranking = compute_ba_mape_ranking(demand_df)
-            if not ranking.empty:
-                fig = px.bar(
-                    ranking.head(10),
-                    x="ba",
-                    y="mape",
-                    title="MAPE by Balancing Authority",
-                    labels={"ba": "BA", "mape": "MAPE (%)"},
-                    color="mape",
-                    color_continuous_scale="RdYlGn_r",
-                )
-                fig.update_layout(height=350, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
+    st.markdown("---")
+    st.markdown(
+        """
+        **Data Sources:** EIA Hourly Demand & Forecast · EIA Interchange ·
+        EIA Generation by Fuel Type · Henry Hub Natural Gas Prices · Open-Meteo Weather
 
-    with overview_cols[1]:
-        st.markdown("#### 🔄 Interchange Patterns")
-        if not interchange_df.empty and "fromba" in interchange_df.columns:
-            net_int = compute_net_interchange(interchange_df, selected_ba)
-            if not net_int.empty:
-                recent = net_int.tail(days_to_show * 24)
-                fig = px.line(
-                    recent,
-                    x="period",
-                    y="net_interchange_mwh",
-                    title=f"{selected_ba} Net Interchange",
-                    labels={"net_interchange_mwh": "MWh", "period": ""},
-                )
-                fig.update_layout(height=350)
-                st.plotly_chart(fig, use_container_width=True)
+        **Team:** Xingyi Wang & Wuhao Xia — SIPA, Columbia University
+        """
+    )
 
-    with overview_cols[2]:
-        st.markdown("#### ⛽ Generation Mix")
-        if not fuel_df.empty and "fueltype" in fuel_df.columns:
-            mix = compute_generation_mix(fuel_df, selected_ba)
-            if not mix.empty:
-                latest_date = mix["date"].max()
-                latest_mix = mix[mix["date"] == latest_date]
-                latest_mix = latest_mix.copy()
-                latest_mix["fuel_label"] = latest_mix["fueltype"].map(FUEL_LABELS)
-                fig = px.pie(
-                    latest_mix,
-                    values="avg_generation_mwh",
-                    names="fuel_label",
-                    title=f"{selected_ba} Latest Generation Mix",
-                )
-                fig.update_layout(height=350)
-                st.plotly_chart(fig, use_container_width=True)
+    elapsed = time.time() - start_time
+    st.caption(f"Page loaded in {elapsed:.2f} seconds")
 
 
 # ==========================================
 # PAGE 2: Forecast Uncertainty
 # ==========================================
 elif page == "🎯 Forecast Uncertainty":
+    start_time = time.time()
     st.title("🎯 Forecast Uncertainty Analysis")
     st.markdown(
         f"""
@@ -337,6 +298,9 @@ elif page == "🎯 Forecast Uncertainty":
         Use the sidebar to switch between balancing authorities and adjust the time window.
         """
     )
+
+    demand_df = _data["demand"]
+    weather_df = _data["weather"]
 
     if demand_df.empty:
         st.warning("No demand data available.")
@@ -442,7 +406,7 @@ elif page == "🎯 Forecast Uncertainty":
 
             # BA MAPE ranking
             st.subheader("Cross-BA Forecast Accuracy Comparison")
-            ranking = compute_ba_mape_ranking(demand_df)
+            ranking = _data["ranking"]
             if not ranking.empty:
                 ranking["ba_name"] = ranking["ba"].map(BA_NAMES)
                 fig4 = px.bar(
@@ -504,11 +468,15 @@ elif page == "🎯 Forecast Uncertainty":
             with st.expander("📊 View Raw Hourly Data"):
                 st.dataframe(df_display, use_container_width=True)
 
+    elapsed = time.time() - start_time
+    st.caption(f"Page loaded in {elapsed:.2f} seconds")
+
 
 # ==========================================
 # PAGE 3: System Flexibility (Interchange)
 # ==========================================
 elif page == "🔄 System Flexibility":
+    start_time = time.time()
     st.title("🔄 System Flexibility — Interregional Power Trade")
     st.markdown(
         f"""
@@ -517,6 +485,9 @@ elif page == "🔄 System Flexibility":
         Positive values = net import; Negative = net export.
         """
     )
+
+    interchange_df = _data["interchange"]
+    demand_df = _data["demand"]
 
     if interchange_df.empty or "fromba" not in interchange_df.columns:
         st.warning("No interchange data available.")
@@ -641,11 +612,15 @@ elif page == "🔄 System Flexibility":
                             "greater reliance on imported power."
                         )
 
+    elapsed = time.time() - start_time
+    st.caption(f"Page loaded in {elapsed:.2f} seconds")
+
 
 # ==========================================
 # PAGE 4: Fuel Substitution & Price Response
 # ==========================================
 elif page == "⛽ Fuel Substitution":
+    start_time = time.time()
     st.title("⛽ Fuel Substitution & Price Response")
     st.markdown(
         f"""
@@ -653,6 +628,9 @@ elif page == "⛽ Fuel Substitution":
         and how fuel composition responds to energy price shocks.
         """
     )
+
+    fuel_df = _data["fuel"]
+    ng_price_df = _data["ng_price"]
 
     if fuel_df.empty or "fueltype" not in fuel_df.columns:
         st.warning("No fuel type data available.")
@@ -800,11 +778,15 @@ elif page == "⛽ Fuel Substitution":
         else:
             st.info("Natural gas price data not available for price-response analysis.")
 
+    elapsed = time.time() - start_time
+    st.caption(f"Page loaded in {elapsed:.2f} seconds")
+
 
 # ==========================================
 # PAGE 5: Geographic Dashboard
 # ==========================================
 elif page == "🗺️ Geographic Dashboard":
+    start_time = time.time()
     st.title("🗺️ Geographic Dashboard")
     st.markdown(
         """
@@ -812,6 +794,10 @@ elif page == "🗺️ Geographic Dashboard":
         Select a metric to visualize regional differences.
         """
     )
+
+    demand_df = _data["demand"]
+    interchange_df = _data["interchange"]
+    fuel_df = _data["fuel"]
 
     geo_summary = build_geographic_summary(demand_df, interchange_df, fuel_df)
 
@@ -889,11 +875,15 @@ elif page == "🗺️ Geographic Dashboard":
             use_container_width=True,
         )
 
+    elapsed = time.time() - start_time
+    st.caption(f"Page loaded in {elapsed:.2f} seconds")
+
 
 # ==========================================
 # PAGE 6: Research & Methodology
 # ==========================================
 elif page == "📄 Research & Methodology":
+    start_time = time.time()
     st.title("📄 Research & Methodology")
     st.caption("Course Project | SIPA Advanced Computing for Policy")
 
@@ -986,3 +976,6 @@ elif page == "📄 Research & Methodology":
 
     st.header("Team")
     st.markdown("**Xingyi Wang & Wuhao Xia** — SIPA, Columbia University")
+
+    elapsed = time.time() - start_time
+    st.caption(f"Page loaded in {elapsed:.2f} seconds")

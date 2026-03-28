@@ -7,6 +7,8 @@ batch all BAs into a single paginated call instead of looping one-by-one.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import pandas as pd
 import requests
 
@@ -45,11 +47,14 @@ BA_WEATHER_COORDS: dict[str, tuple[float, float]] = {
 # EIA fuel type codes
 FUEL_TYPES = ["NG", "SUN", "WND", "NUC", "COL", "WAT", "OIL", "OTH"]
 
-# Time range (3 months)
-DEFAULT_START = "2025-10-01T00"
-DEFAULT_END = "2026-01-01T00"
-DEFAULT_START_DATE = "2025-10-01"
-DEFAULT_END_DATE = "2026-01-01"
+# Time range: always "3 months ago → today", computed dynamically
+_today = datetime.now()
+_three_months_ago = _today - timedelta(days=90)
+
+DEFAULT_START = _three_months_ago.strftime("%Y-%m-%dT00")
+DEFAULT_END = _today.strftime("%Y-%m-%dT00")
+DEFAULT_START_DATE = _three_months_ago.strftime("%Y-%m-%d")
+DEFAULT_END_DATE = _today.strftime("%Y-%m-%d")
 
 
 # ---------------------------------------------------------------------------

@@ -94,11 +94,11 @@ streamlit run app.py
 The app reads all data from BigQuery via a service account. Configure secrets in Streamlit Cloud under **Settings → Secrets**.
 
 ### Methodology Highlights
-**Anomaly Detection** uses rolling forecast error monitoring with BA-specific historical percentile thresholds
-**Arbitrage Signals** score interchange routes based on directional consistency and stability
-**Renewable Investment Scoring** combines demand growth, renewable headroom, import dependence, and fossil transition opportunity
-**Compliance Reports** generate structured operational summaries for selected balancing authorities
-**Market Overview** provides a real-time operational snapshot across key grid indicators
+- **Anomaly Detection** uses rolling forecast error monitoring with BA-specific historical percentile thresholds
+- **Arbitrage Signals** score interchange routes based on directional consistency and stability
+- **Renewable Investment Scoring** combines demand growth, renewable headroom, import dependence, and fossil transition opportunity
+- **Compliance Reports** generate structured operational summaries for selected balancing authorities
+- **Market Overview** provides a real-time operational snapshot across key grid indicators
 
 ## Team
 

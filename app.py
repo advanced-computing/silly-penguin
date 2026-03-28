@@ -1,20 +1,10 @@
-"""
-EIA Grid Monitor Dashboard
-How Do Power Systems Respond to Uncertainty and Shocks?
-
-Pages:
-1. Executive Overview
-2. Forecast Uncertainty
-3. System Flexibility (Interchange)
-4. Fuel Substitution & Price Response
-5. Geographic Dashboard
-6. Research & Methodology
-"""
+"""Grid Intelligence Platform — Open-Source Power Market Intelligence."""
 
 from __future__ import annotations
 
 import time
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -24,55 +14,59 @@ from plotly.subplots import make_subplots
 from data_processing import (
     build_geographic_summary,
     calculate_grid_kpis,
-    compute_daily_demand_stats,
-    compute_daily_interchange,
-    compute_error_heatmap_data,
-    compute_fuel_share,
     compute_generation_mix,
-    compute_hourly_interchange_pattern,
+    compute_interchange_patterns,
     compute_net_interchange,
-    compute_ng_price_vs_generation,
-    merge_demand_weather,
+    compute_renewable_siting_scores,
+    detect_anomalies,
+    generate_compliance_summary,
+    get_ba_error_distribution,
+    get_pair_hourly_profile,
+    identify_arbitrage_opportunities,
     prepare_demand_pivot,
 )
 
 # ==========================================
-# Page Config
+# Config & Theme
 # ==========================================
 st.set_page_config(
-    page_title="US Grid Monitor",
+    page_title="Grid Intelligence",
     page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
-HTTP_OK = 200
+C_PRIMARY = "#1e40af"
+C_SECONDARY = "#0369a1"
+C_ACCENT = "#0891b2"
+C_RED = "#dc2626"
+C_AMBER = "#d97706"
+C_GREEN = "#059669"
+C_SLATE = "#475569"
+C_GRID = "#e2e8f0"
 
-# ==========================================
-# BigQuery Connection
-# ==========================================
+FUEL_COLORS = {
+    "Natural Gas": "#fb923c",
+    "Solar": "#facc15",
+    "Wind": "#22d3ee",
+    "Nuclear": "#a78bfa",
+    "Coal": "#78716c",
+    "Hydro": "#38bdf8",
+    "Oil": "#f87171",
+    "Other": "#cbd5e1",
+}
+FUEL_LABELS = {
+    "NG": "Natural Gas",
+    "SUN": "Solar",
+    "WND": "Wind",
+    "NUC": "Nuclear",
+    "COL": "Coal",
+    "WAT": "Hydro",
+    "OIL": "Oil",
+    "OTH": "Other",
+}
+
 GCP_PROJECT = "sipa-adv-c-silly-penguin"
 BQ_DATASET = "eia_data"
-
-
-def _get_bq_credentials():
-    """Build credentials from Streamlit secrets or fall back to ADC."""
-    try:
-        from google.oauth2 import service_account
-
-        return service_account.Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=["https://www.googleapis.com/auth/bigquery"],
-        )
-    except (FileNotFoundError, KeyError):
-        return None  # falls back to Application Default Credentials
-
-
-_bq_creds = _get_bq_credentials()
-
-# ==========================================
-# BA Constants
-# ==========================================
 MAJOR_BA = [
     "CISO",
     "ERCO",
@@ -85,7 +79,6 @@ MAJOR_BA = [
     "TVA",
     "BPAT",
 ]
-
 BA_NAMES = {
     "CISO": "California ISO",
     "ERCO": "ERCOT (Texas)",
@@ -98,74 +91,104 @@ BA_NAMES = {
     "TVA": "Tennessee Valley Authority",
     "BPAT": "Bonneville Power Admin",
 }
+NERC_PEAK_START = 14
+NERC_PEAK_END = 20
 
-FUEL_LABELS = {
-    "NG": "Natural Gas",
-    "SUN": "Solar",
-    "WND": "Wind",
-    "NUC": "Nuclear",
-    "COL": "Coal",
-    "WAT": "Hydro",
-    "OIL": "Oil",
-    "OTH": "Other",
-}
+
+def _style(fig, h=440):
+    """Professional styling for all Plotly figures."""
+    fig.update_layout(
+        font=dict(family="Inter, sans-serif", size=12, color="#1e293b"),
+        margin=dict(l=50, r=20, t=48, b=48),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor="white", font_size=11, bordercolor=C_GRID),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.16,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11),
+        ),
+        height=h,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+    )
+    fig.update_xaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor=C_GRID,
+        zeroline=False,
+        linecolor="#cbd5e1",
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor=C_GRID,
+        zeroline=False,
+        linecolor="#cbd5e1",
+    )
+    return fig
 
 
 # ==========================================
-# Data Loading: one-time upfront load, then all pages read from memory
+# Auth & Data
 # ==========================================
-def _get_bq_client():
-    """Create a BigQuery client."""
-    from google.cloud import bigquery
+def _get_creds():
+    try:
+        from google.oauth2 import service_account
 
-    if _bq_creds is not None:
-        return bigquery.Client(project=GCP_PROJECT, credentials=_bq_creds)
-    return bigquery.Client(project=GCP_PROJECT)
+        return service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=["https://www.googleapis.com/auth/bigquery"],
+        )
+    except (FileNotFoundError, KeyError):
+        return None
 
 
+_creds = _get_creds()
 _DS = f"{GCP_PROJECT}.{BQ_DATASET}"
 
 
-@st.cache_resource(show_spinner="Loading data from BigQuery (one-time)...")
-def _load_all_data():
-    """Load all tables once at app startup. Stays in memory across reruns."""
-    client = _get_bq_client()
+@st.cache_resource(show_spinner="⚡ Loading market data...")
+def _load_all():
+    from google.cloud import bigquery
 
-    def q(sql):
-        return client.query(sql).to_dataframe()
+    cl = bigquery.Client(project=GCP_PROJECT, credentials=_creds)
 
-    data = {}
+    def q(s):
+        return cl.query(s).to_dataframe()
 
-    # Demand (single query, all BAs)
+    d = {}
+
     df = q(
-        "SELECT period, respondent, `type-name`, CAST(value AS FLOAT64) AS value "
+        "SELECT period, respondent, `type-name`, "
+        "CAST(value AS FLOAT64) AS value "
         f"FROM `{_DS}.hourly_demand`"
     )
     df["period"] = pd.to_datetime(df["period"])
-    data["demand"] = df
+    d["demand"] = df
 
-    # Interchange
     df = q(
-        "SELECT period, fromba, toba, CAST(value AS FLOAT64) AS value "
+        "SELECT period, fromba, toba, "
+        "CAST(value AS FLOAT64) AS value "
         f"FROM `{_DS}.hourly_interchange`"
     )
     df["period"] = pd.to_datetime(df["period"])
-    data["interchange"] = df
+    d["interchange"] = df
 
-    # Fuel type
     df = q(
-        "SELECT period, respondent, fueltype, CAST(value AS FLOAT64) AS value "
+        "SELECT period, respondent, fueltype, "
+        "CAST(value AS FLOAT64) AS value "
         f"FROM `{_DS}.hourly_fuel_type`"
     )
     df["period"] = pd.to_datetime(df["period"])
-    data["fuel"] = df
+    d["fuel"] = df
 
-    # NG prices
     df = q(f"SELECT date, CAST(ng_price AS FLOAT64) AS ng_price FROM `{_DS}.daily_ng_price`")
     df["date"] = pd.to_datetime(df["date"])
-    data["ng_price"] = df
+    d["ng_price"] = df
 
-    # Weather
     df = q(
         "SELECT date, ba, "
         "CAST(avg_temp AS FLOAT64) AS avg_temp, "
@@ -174,808 +197,925 @@ def _load_all_data():
         f"FROM `{_DS}.daily_weather`"
     )
     df["date"] = pd.to_datetime(df["date"])
-    data["weather"] = df
+    d["weather"] = df
 
-    # MAPE ranking (pre-aggregated, tiny)
-    data["ranking"] = q(f"SELECT * FROM `{_DS}.ba_mape_ranking` ORDER BY mape")
-
-    return data
+    d["ranking"] = q(f"SELECT * FROM `{_DS}.ba_mape_ranking` ORDER BY mape")
+    return d
 
 
-# Load once — persists across all page navigations and reruns
-_data = _load_all_data()
-
+_D = _load_all()
 
 # ==========================================
 # Sidebar
 # ==========================================
-st.sidebar.title("⚡ US Grid Monitor")
-st.sidebar.caption("How Do Power Systems Respond to Uncertainty and Shocks?")
+st.sidebar.title("⚡ Grid Intelligence")
 st.sidebar.markdown("---")
-
 page = st.sidebar.radio(
-    "Navigate",
+    "Module",
     [
-        "📊 Executive Overview",
-        "🎯 Forecast Uncertainty",
-        "🔄 System Flexibility",
-        "⛽ Fuel Substitution",
-        "🗺️ Geographic Dashboard",
-        "📄 Research & Methodology",
+        "🚨 Anomaly Detection",
+        "💰 Arbitrage Signals",
+        "🌱 Renewable Siting",
+        "📋 Compliance Reports",
+        "📊 Market Overview",
+        "📄 About",
     ],
 )
-
 st.sidebar.markdown("---")
-days_to_show = st.sidebar.slider("Days to visualize", 1, 30, 7)
-
-# BA selector for detail pages
-selected_ba = st.sidebar.selectbox(
-    "Select Balancing Authority",
+sel_ba = st.sidebar.selectbox(
+    "Balancing Authority",
     MAJOR_BA,
-    format_func=lambda x: f"{x} — {BA_NAMES.get(x, x)}",
+    format_func=lambda x: f"{x} — {BA_NAMES[x]}",
 )
+days = st.sidebar.slider("Time window (days)", 1, 30, 7)
 
 
-# ==========================================
-# PAGE 1: Executive Overview
-# ==========================================
-if page == "📊 Executive Overview":
-    start_time = time.time()
-    st.title("📊 US Grid Monitor")
+# ===================================================================
+# 🚨 ANOMALY DETECTION
+# ===================================================================
+if page == "🚨 Anomaly Detection":
+    t0 = time.time()
+    st.title("🚨 Anomaly Detection")
     st.markdown(
-        """
-        ### How Do Power Systems Respond to Uncertainty and Shocks?
-
-        This dashboard analyzes US electricity grid behavior across **10 major
-        balancing authorities** using hourly data from the Energy Information
-        Administration (EIA). Explore three dimensions of grid resilience:
-        """
+        "Monitors forecast errors across all balancing "
+        "authorities and flags regions where recent errors "
+        "persistently exceed historical norms.",
+        help=(
+            "For each BA we compute the P90 and P95 of "
+            "historical absolute forecast error. If ≥3 of "
+            "the last 6 hours exceed P95 → RED. "
+            "≥3 exceed P90 → YELLOW. Otherwise GREEN."
+        ),
     )
-
-    st.markdown("---")
-
-    dim_cols = st.columns(3)
-    with dim_cols[0]:
-        st.markdown(
-            """
-            #### 🎯 Forecast Uncertainty
-            How accurate are day-ahead demand forecasts?
-            When and where do the largest errors occur?
-
-            → Select **Forecast Uncertainty** in the sidebar
-            """
-        )
-    with dim_cols[1]:
-        st.markdown(
-            """
-            #### 🔄 System Flexibility
-            Do regions rely more on power imports during
-            high-demand periods? What are the intra-day patterns?
-
-            → Select **System Flexibility** in the sidebar
-            """
-        )
-    with dim_cols[2]:
-        st.markdown(
-            """
-            #### ⛽ Fuel Substitution
-            How does the generation mix shift when natural gas
-            prices change? Which fuels serve as substitutes?
-
-            → Select **Fuel Substitution** in the sidebar
-            """
-        )
-
-    st.markdown("---")
-
-    st.subheader("Balancing Authorities Covered")
-    ba_table = pd.DataFrame([{"Code": k, "Name": v} for k, v in BA_NAMES.items()])
-    st.dataframe(ba_table, use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-    st.markdown(
-        """
-        **Data Sources:** EIA Hourly Demand & Forecast · EIA Interchange ·
-        EIA Generation by Fuel Type · Henry Hub Natural Gas Prices · Open-Meteo Weather
-
-        **Team:** Xingyi Wang & Wuhao Xia — SIPA, Columbia University
-        """
-    )
-
-    elapsed = time.time() - start_time
-    st.caption(f"Page loaded in {elapsed:.2f} seconds")
-
-
-# ==========================================
-# PAGE 2: Forecast Uncertainty
-# ==========================================
-elif page == "🎯 Forecast Uncertainty":
-    start_time = time.time()
-    st.title("🎯 Forecast Uncertainty Analysis")
-    st.markdown(
-        f"""
-        Analyzing demand forecast errors for **{BA_NAMES.get(selected_ba, selected_ba)}**.
-        Use the sidebar to switch between balancing authorities and adjust the time window.
-        """
-    )
-
-    demand_df = _data["demand"]
-    weather_df = _data["weather"]
-
-    if demand_df.empty:
-        st.warning("No demand data available.")
+    alerts = detect_anomalies(_D["demand"])
+    if alerts.empty:
+        st.info("No data available.")
     else:
-        pivot = prepare_demand_pivot(demand_df, selected_ba)
+        red = alerts[alerts["status"] == "RED"]
+        yel = alerts[alerts["status"] == "YELLOW"]
+        grn = alerts[alerts["status"] == "NORMAL"]
 
-        if pivot.empty:
-            st.warning(f"No demand data found for {selected_ba}.")
-        else:
-            # KPIs
-            actual, forecast, delta = calculate_grid_kpis(pivot)
-            if actual is not None:
-                kpi_cols = st.columns(4)
-                kpi_cols[0].metric("Latest Demand", f"{actual:,.0f} MWh")
-                kpi_cols[1].metric("Latest Forecast", f"{forecast:,.0f} MWh")
-                kpi_cols[2].metric("Forecast Error", f"{delta:,.0f} MWh")
-                if "APE" in pivot.columns:
-                    avg_mape = pivot["APE"].mean()
-                    kpi_cols[3].metric("Avg MAPE", f"{avg_mape:.2f}%")
-
-            st.markdown("---")
-
-            # Forecast vs Actual time series
-            st.subheader(f"Demand vs Forecast — Last {days_to_show} Days")
-            df_display = pivot.head(days_to_show * 24).sort_index()
-
-            if {"Demand", "Day-ahead demand forecast"}.issubset(df_display.columns):
-                fig = go.Figure()
-                fig.add_trace(
-                    go.Scatter(
-                        x=df_display.index,
-                        y=df_display["Demand"],
-                        name="Actual Demand",
-                        line={"color": "#2196F3", "width": 2},
-                    )
+        col_r, col_y, col_g = st.columns(3)
+        with col_r:
+            st.markdown(f"#### 🔴 Critical ({len(red)})")
+            for _, r in red.iterrows():
+                st.error(
+                    f"**{r['ba']}** — "
+                    f"{BA_NAMES.get(r['ba'], '')}  \n"
+                    f"Error: **{r['latest_error']:,.0f}** MWh"
+                    f" · 6h avg: {r['recent_mean_error']:,.0f}"
+                    f" · P95: {r['p95_threshold']:,.0f}",
+                    icon="🔴",
                 )
-                fig.add_trace(
-                    go.Scatter(
-                        x=df_display.index,
-                        y=df_display["Day-ahead demand forecast"],
-                        name="Day-ahead Forecast",
-                        line={"color": "#FF9800", "width": 2, "dash": "dash"},
-                    )
+        with col_y:
+            st.markdown(f"#### 🟡 Warning ({len(yel)})")
+            for _, r in yel.iterrows():
+                st.warning(
+                    f"**{r['ba']}** — "
+                    f"{BA_NAMES.get(r['ba'], '')}  \n"
+                    f"Error: **{r['latest_error']:,.0f}** MWh"
+                    f" · 6h avg: {r['recent_mean_error']:,.0f}"
+                    f" · P90: {r['p90_threshold']:,.0f}",
+                    icon="🟡",
                 )
-                fig.update_layout(
-                    height=450,
-                    xaxis_title="Time",
-                    yaxis_title="Demand (MWh)",
-                    hovermode="x unified",
-                    legend={"orientation": "h", "y": -0.15},
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            # Error trend with MA
-            if "Forecast Error" in df_display.columns:
-                st.subheader("Forecast Error Trend")
-                fig2 = go.Figure()
-                fig2.add_trace(
-                    go.Scatter(
-                        x=df_display.index,
-                        y=df_display["Forecast Error"],
-                        name="Hourly Error",
-                        line={"color": "#E91E63", "width": 1},
-                        opacity=0.6,
-                    )
-                )
-                if "Error 24h MA" in df_display.columns:
-                    fig2.add_trace(
-                        go.Scatter(
-                            x=df_display.index,
-                            y=df_display["Error 24h MA"],
-                            name="24h Moving Average",
-                            line={"color": "#4CAF50", "width": 2.5},
-                        )
-                    )
-                fig2.add_hline(y=0, line_dash="dot", line_color="gray")
-                fig2.update_layout(
-                    height=400,
-                    xaxis_title="Time",
-                    yaxis_title="Forecast Error (MWh)",
-                    hovermode="x unified",
-                    legend={"orientation": "h", "y": -0.15},
-                )
-                st.plotly_chart(fig2, use_container_width=True)
-
-            # Error heatmap
-            st.subheader("Forecast Error Heatmap (Hour × Date)")
-            heatmap_data = compute_error_heatmap_data(demand_df, selected_ba)
-            if not heatmap_data.empty:
-                fig3 = px.imshow(
-                    heatmap_data.T,
-                    labels={"x": "Date", "y": "Hour of Day", "color": "Error (MWh)"},
-                    color_continuous_scale="RdBu_r",
-                    color_continuous_midpoint=0,
-                    aspect="auto",
-                )
-                fig3.update_layout(height=400)
-                st.plotly_chart(fig3, use_container_width=True)
-                st.caption(
-                    "Red = demand exceeded forecast; Blue = forecast exceeded demand. "
-                    "Patterns reveal systematic time-of-day biases."
+        with col_g:
+            st.markdown(f"#### 🟢 Normal ({len(grn)})")
+            for _, r in grn.iterrows():
+                st.success(
+                    f"**{r['ba']}** — "
+                    f"{BA_NAMES.get(r['ba'], '')}  \n"
+                    f"Error: {r['latest_error']:,.0f} MWh"
+                    " · Within normal range",
+                    icon="🟢",
                 )
 
-            # BA MAPE ranking
-            st.subheader("Cross-BA Forecast Accuracy Comparison")
-            ranking = _data["ranking"]
-            if not ranking.empty:
-                ranking["ba_name"] = ranking["ba"].map(BA_NAMES)
-                fig4 = px.bar(
-                    ranking,
-                    x="mape",
-                    y="ba_name",
-                    orientation="h",
-                    title="MAPE Ranking Across Balancing Authorities",
-                    labels={"mape": "MAPE (%)", "ba_name": ""},
-                    color="mape",
-                    color_continuous_scale="RdYlGn_r",
-                )
-                fig4.update_layout(
-                    height=400,
-                    yaxis={"categoryorder": "total ascending"},
-                    showlegend=False,
-                )
-                st.plotly_chart(fig4, use_container_width=True)
+        st.markdown("---")
 
-            # Weather impact
-            st.subheader("Temperature Sensitivity")
-            daily_stats = compute_daily_demand_stats(demand_df, selected_ba)
-            if not daily_stats.empty and not weather_df.empty:
-                merged = merge_demand_weather(daily_stats, weather_df, selected_ba)
-                if not merged.empty:
-                    weather_cols = st.columns(2)
-                    with weather_cols[0]:
-                        fig5 = px.scatter(
-                            merged,
-                            x="avg_temp",
-                            y="avg_demand_mwh",
-                            title="Temperature vs Demand",
-                            labels={
-                                "avg_temp": "Avg Temperature (°C)",
-                                "avg_demand_mwh": "Avg Demand (MWh)",
-                            },
-                            trendline="ols",
-                            opacity=0.7,
-                        )
-                        fig5.update_layout(height=400)
-                        st.plotly_chart(fig5, use_container_width=True)
-
-                    with weather_cols[1]:
-                        fig6 = px.scatter(
-                            merged,
-                            x="avg_temp",
-                            y="avg_error_mwh",
-                            title="Temperature vs Forecast Error",
-                            labels={
-                                "avg_temp": "Avg Temperature (°C)",
-                                "avg_error_mwh": "Avg Error (MWh)",
-                            },
-                            trendline="ols",
-                            opacity=0.7,
-                        )
-                        fig6.update_layout(height=400)
-                        st.plotly_chart(fig6, use_container_width=True)
-
-            with st.expander("📊 View Raw Hourly Data"):
-                st.dataframe(df_display, use_container_width=True)
-
-    elapsed = time.time() - start_time
-    st.caption(f"Page loaded in {elapsed:.2f} seconds")
-
-
-# ==========================================
-# PAGE 3: System Flexibility (Interchange)
-# ==========================================
-elif page == "🔄 System Flexibility":
-    start_time = time.time()
-    st.title("🔄 System Flexibility — Interregional Power Trade")
-    st.markdown(
-        f"""
-        Analyzing how **{BA_NAMES.get(selected_ba, selected_ba)}** relies on
-        interregional power interchange as a flexibility mechanism.
-        Positive values = net import; Negative = net export.
-        """
-    )
-
-    interchange_df = _data["interchange"]
-    demand_df = _data["demand"]
-
-    if interchange_df.empty or "fromba" not in interchange_df.columns:
-        st.warning("No interchange data available.")
-    else:
-        # Net interchange time series
-        st.subheader(f"{selected_ba} Net Interchange — Last {days_to_show} Days")
-        net_int = compute_net_interchange(interchange_df, selected_ba)
-        if not net_int.empty:
-            recent = net_int.tail(days_to_show * 24)
+        # Control chart
+        st.subheader(
+            f"{sel_ba} — Error Control Chart",
+            help=(
+                "A control chart plots the metric with "
+                "upper control limits (P90, P95). Points "
+                "outside = 'out of control'."
+            ),
+        )
+        ba_err = get_ba_error_distribution(_D["demand"], sel_ba)
+        if not ba_err.empty:
+            ba_a = alerts[alerts["ba"] == sel_ba]
+            p95 = ba_a["p95_threshold"].iloc[0] if not ba_a.empty else None
+            p90 = ba_a["p90_threshold"].iloc[0] if not ba_a.empty else None
             fig = go.Figure()
             fig.add_trace(
                 go.Scatter(
-                    x=recent["period"],
-                    y=recent["net_interchange_mwh"],
+                    x=ba_err["period"],
+                    y=ba_err["abs_error"],
+                    mode="lines",
+                    name="Absolute Error",
+                    line=dict(color=C_PRIMARY, width=1.2),
                     fill="tozeroy",
-                    name="Net Interchange",
-                    line={"color": "#00BCD4", "width": 1.5},
-                    fillcolor="rgba(0, 188, 212, 0.2)",
+                    fillcolor="rgba(30,64,175,0.06)",
                 )
             )
-            fig.add_hline(y=0, line_dash="dot", line_color="gray")
+            if p95:
+                fig.add_hline(
+                    y=p95,
+                    line_dash="dash",
+                    line_color=C_RED,
+                    line_width=1.5,
+                    annotation_text=f"P95 = {p95:,.0f}",
+                    annotation_font=dict(color=C_RED, size=11),
+                )
+            if p90:
+                fig.add_hline(
+                    y=p90,
+                    line_dash="dot",
+                    line_color=C_AMBER,
+                    line_width=1.2,
+                    annotation_text=f"P90 = {p90:,.0f}",
+                    annotation_font=dict(color=C_AMBER, size=11),
+                    annotation_position="bottom right",
+                )
             fig.update_layout(
-                height=450,
-                xaxis_title="Time",
-                yaxis_title="Net Interchange (MWh)",
-                hovermode="x unified",
+                xaxis_title="",
+                yaxis_title="Absolute Error (MWh)",
             )
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption("Above zero = net import from other regions; below zero = net export.")
-
-        # Daily interchange trend
-        st.subheader("Daily Interchange Summary")
-        daily_int = compute_daily_interchange(interchange_df, selected_ba)
-        if not daily_int.empty:
-            fig2 = go.Figure()
-            fig2.add_trace(
-                go.Scatter(
-                    x=daily_int["date"],
-                    y=daily_int["avg_interchange"],
-                    name="Daily Average",
-                    line={"color": "#00BCD4", "width": 2},
-                )
-            )
-            fig2.add_trace(
-                go.Scatter(
-                    x=daily_int["date"],
-                    y=daily_int["max_interchange"],
-                    name="Daily Max",
-                    line={"color": "#FF5722", "width": 1, "dash": "dot"},
-                    opacity=0.5,
-                )
-            )
-            fig2.add_trace(
-                go.Scatter(
-                    x=daily_int["date"],
-                    y=daily_int["min_interchange"],
-                    name="Daily Min",
-                    line={"color": "#4CAF50", "width": 1, "dash": "dot"},
-                    opacity=0.5,
-                )
-            )
-            fig2.add_hline(y=0, line_dash="dot", line_color="gray")
-            fig2.update_layout(
-                height=400,
-                xaxis_title="Date",
-                yaxis_title="Interchange (MWh)",
-                hovermode="x unified",
-                legend={"orientation": "h", "y": -0.15},
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-
-        int_detail_cols = st.columns(2)
-
-        # Hourly pattern
-        with int_detail_cols[0]:
-            st.subheader("Hourly Interchange Pattern")
-            hourly_pat = compute_hourly_interchange_pattern(interchange_df, selected_ba)
-            if not hourly_pat.empty:
-                fig3 = px.bar(
-                    hourly_pat,
-                    x="hour",
-                    y="avg_interchange_mwh",
-                    title="Average Interchange by Hour of Day",
-                    labels={
-                        "hour": "Hour",
-                        "avg_interchange_mwh": "Avg MWh",
-                    },
-                    color="avg_interchange_mwh",
-                    color_continuous_scale="RdBu_r",
-                    color_continuous_midpoint=0,
-                )
-                fig3.update_layout(height=400, showlegend=False)
-                st.plotly_chart(fig3, use_container_width=True)
-                st.caption("Reveals which hours the region imports vs exports power.")
-
-        # Demand vs Interchange scatter
-        with int_detail_cols[1]:
-            st.subheader("Demand vs Net Interchange")
-            if not demand_df.empty:
-                ba_demand = demand_df[
-                    (demand_df["respondent"] == selected_ba) & (demand_df["type-name"] == "Demand")
-                ].copy()
-                if not ba_demand.empty and not net_int.empty:
-                    scatter_data = ba_demand.merge(net_int, on="period", how="inner")
-                    if not scatter_data.empty:
-                        fig4 = px.scatter(
-                            scatter_data,
-                            x="value",
-                            y="net_interchange_mwh",
-                            title="Demand Level vs Net Interchange",
-                            labels={
-                                "value": "Demand (MWh)",
-                                "net_interchange_mwh": "Net Interchange (MWh)",
-                            },
-                            trendline="ols",
-                            opacity=0.4,
-                        )
-                        fig4.update_layout(height=400)
-                        st.plotly_chart(fig4, use_container_width=True)
-                        st.caption(
-                            "Tests whether higher demand correlates with "
-                            "greater reliance on imported power."
-                        )
-
-    elapsed = time.time() - start_time
-    st.caption(f"Page loaded in {elapsed:.2f} seconds")
-
-
-# ==========================================
-# PAGE 4: Fuel Substitution & Price Response
-# ==========================================
-elif page == "⛽ Fuel Substitution":
-    start_time = time.time()
-    st.title("⛽ Fuel Substitution & Price Response")
-    st.markdown(
-        f"""
-        Analyzing the generation mix for **{BA_NAMES.get(selected_ba, selected_ba)}**
-        and how fuel composition responds to energy price shocks.
-        """
-    )
-
-    fuel_df = _data["fuel"]
-    ng_price_df = _data["ng_price"]
-
-    if fuel_df.empty or "fueltype" not in fuel_df.columns:
-        st.warning("No fuel type data available.")
-    else:
-        # Generation mix stacked area
-        st.subheader("Daily Generation Mix")
-        mix = compute_generation_mix(fuel_df, selected_ba)
-        if not mix.empty:
-            mix_display = mix.copy()
-            mix_display["fuel_label"] = mix_display["fueltype"].map(FUEL_LABELS)
-
-            fig = px.area(
-                mix_display,
-                x="date",
-                y="avg_generation_mwh",
-                color="fuel_label",
-                title=f"{selected_ba} Generation by Fuel Type",
-                labels={
-                    "avg_generation_mwh": "Avg Generation (MWh)",
-                    "date": "Date",
-                    "fuel_label": "Fuel Type",
-                },
-                color_discrete_map={
-                    "Natural Gas": "#FF9800",
-                    "Solar": "#FFC107",
-                    "Wind": "#03A9F4",
-                    "Nuclear": "#9C27B0",
-                    "Coal": "#795548",
-                    "Hydro": "#2196F3",
-                    "Oil": "#F44336",
-                    "Other": "#9E9E9E",
-                },
-            )
-            fig.update_layout(
-                height=500,
-                hovermode="x unified",
-                legend={"orientation": "h", "y": -0.2},
-            )
+            _style(fig)
             st.plotly_chart(fig, use_container_width=True)
 
-        # Fuel share trends
-        st.subheader("Fuel Share Trends (%)")
-        share = compute_fuel_share(fuel_df, selected_ba)
-        if not share.empty:
-            share_display = share.copy()
-            share_display["fuel_label"] = share_display["fueltype"].map(FUEL_LABELS)
-
-            fig2 = px.line(
-                share_display,
-                x="date",
-                y="share_pct",
-                color="fuel_label",
-                title=f"{selected_ba} Fuel Share Over Time",
+        # Violin plot
+        st.subheader(
+            "Cross-BA Error Comparison",
+            help=(
+                "Violin plots show both distribution shape "
+                "and density of forecast errors for each BA."
+            ),
+        )
+        all_err = []
+        for ba in MAJOR_BA:
+            e = get_ba_error_distribution(_D["demand"], ba)
+            if not e.empty:
+                e = e[["abs_error"]].copy()
+                e["BA"] = ba
+                all_err.append(e)
+        if all_err:
+            err_df = pd.concat(all_err, ignore_index=True)
+            fig_v = px.violin(
+                err_df,
+                x="BA",
+                y="abs_error",
+                box=True,
+                points=False,
+                color_discrete_sequence=[C_PRIMARY],
                 labels={
-                    "share_pct": "Share (%)",
-                    "date": "Date",
-                    "fuel_label": "Fuel Type",
+                    "abs_error": "Absolute Error (MWh)",
+                    "BA": "",
                 },
             )
-            fig2.update_layout(
-                height=450,
-                hovermode="x unified",
-                legend={"orientation": "h", "y": -0.2},
-            )
-            st.plotly_chart(fig2, use_container_width=True)
+            _style(fig_v, h=400)
+            st.plotly_chart(fig_v, use_container_width=True)
 
-        # NG price vs generation
-        st.subheader("Natural Gas Price vs Generation Response")
-        if not ng_price_df.empty:
-            price_gen = compute_ng_price_vs_generation(fuel_df, ng_price_df, selected_ba)
-            if not price_gen.empty:
-                # Dual-axis: NG price + NG generation share
-                ng_data = price_gen[price_gen["fueltype"] == "NG"]
-                if not ng_data.empty:
-                    fig3 = make_subplots(specs=[[{"secondary_y": True}]])
-                    fig3.add_trace(
-                        go.Scatter(
-                            x=ng_data["date"],
-                            y=ng_data["ng_price"],
-                            name="Henry Hub Price ($/MMBtu)",
-                            line={"color": "#F44336", "width": 2},
-                        ),
-                        secondary_y=False,
-                    )
-                    fig3.add_trace(
-                        go.Scatter(
-                            x=ng_data["date"],
-                            y=ng_data["share_pct"],
-                            name="NG Generation Share (%)",
-                            line={"color": "#FF9800", "width": 2},
-                        ),
-                        secondary_y=True,
-                    )
-                    fig3.update_layout(
-                        title="Natural Gas Price vs Generation Share",
-                        height=450,
-                        hovermode="x unified",
-                        legend={"orientation": "h", "y": -0.15},
-                    )
-                    fig3.update_yaxes(title_text="Price ($/MMBtu)", secondary_y=False)
-                    fig3.update_yaxes(title_text="NG Share (%)", secondary_y=True)
-                    st.plotly_chart(fig3, use_container_width=True)
-                    st.caption(
-                        "When natural gas prices spike, do other fuels "
-                        "increase their share? This dual-axis chart reveals "
-                        "the price-generation relationship."
-                    )
-
-                # Price elasticity scatter by fuel
-                st.subheader("Price Sensitivity by Fuel Type")
-                fuel_types_to_plot = ["NG", "COL", "SUN", "WND", "NUC", "WAT", "OIL"]
-                scatter_frames = []
-                for ft in fuel_types_to_plot:
-                    ft_data = price_gen[price_gen["fueltype"] == ft].copy()
-                    if not ft_data.empty:
-                        ft_data["fuel_label"] = ft_data["fueltype"].map(FUEL_LABELS)
-                        scatter_frames.append(ft_data)
-
-                if scatter_frames:
-                    all_scatter = pd.concat(scatter_frames, ignore_index=True)
-                    fig4 = px.scatter(
-                        all_scatter,
-                        x="ng_price",
-                        y="share_pct",
-                        color="fuel_label",
-                        title="NG Price vs Fuel Generation Share",
-                        labels={
-                            "ng_price": "Henry Hub Price ($/MMBtu)",
-                            "share_pct": "Generation Share (%)",
-                            "fuel_label": "Fuel Type",
-                        },
-                        trendline="ols",
-                        opacity=0.5,
-                    )
-                    fig4.update_layout(
-                        height=500,
-                        legend={"orientation": "h", "y": -0.2},
-                    )
-                    st.plotly_chart(fig4, use_container_width=True)
-                    st.caption(
-                        "Each point is one day. Trend lines show whether a fuel type's "
-                        "share increases or decreases as gas prices rise — revealing "
-                        "fuel substitution dynamics."
-                    )
-        else:
-            st.info("Natural gas price data not available for price-response analysis.")
-
-    elapsed = time.time() - start_time
-    st.caption(f"Page loaded in {elapsed:.2f} seconds")
+    st.caption(f"Loaded in {time.time() - t0:.2f}s")
 
 
-# ==========================================
-# PAGE 5: Geographic Dashboard
-# ==========================================
-elif page == "🗺️ Geographic Dashboard":
-    start_time = time.time()
-    st.title("🗺️ Geographic Dashboard")
+# ===================================================================
+# 💰 ARBITRAGE SIGNALS
+# ===================================================================
+elif page == "💰 Arbitrage Signals":
+    t0 = time.time()
+    st.title("💰 Arbitrage Signals")
     st.markdown(
-        """
-        A map-based view of power system performance across major US balancing authorities.
-        Select a metric to visualize regional differences.
-        """
+        "Identifies persistent directional power flows "
+        "between regions during peak hours, indicating "
+        "potential price differentials.",
+        help=(
+            "We compute average hourly interchange for "
+            "every BA pair, focusing on NERC peak hours "
+            "(14:00–20:00). Signal = 60% directional "
+            "strength + 40% consistency."
+        ),
     )
-
-    demand_df = _data["demand"]
-    interchange_df = _data["interchange"]
-    fuel_df = _data["fuel"]
-
-    geo_summary = build_geographic_summary(demand_df, interchange_df, fuel_df)
-
-    if geo_summary.empty:
-        st.warning("Geographic data not available.")
+    signals = identify_arbitrage_opportunities(_D["interchange"])
+    if signals.empty:
+        st.info("No data.")
     else:
-        metric_option = st.selectbox(
-            "Select map metric",
-            ["mape", "avg_demand", "avg_net_interchange", "renewable_share"],
-            format_func=lambda x: {
-                "mape": "Forecast MAPE (%)",
-                "avg_demand": "Average Demand (MWh)",
-                "avg_net_interchange": "Avg Net Interchange (MWh)",
-                "renewable_share": "Renewable Share (%)",
-            }.get(x, x),
+        disp = signals.head(12).copy()
+        disp["route"] = disp["fromba"] + " → " + disp["toba"]
+
+        st.subheader(
+            "Top Opportunities — NERC Peak (14–20h)",
+            help=("Routes ranked by signal strength. High score = large, consistent flow."),
+        )
+        top8 = disp.head(8).sort_values("signal_score")
+        fig = make_subplots(
+            rows=1,
+            cols=3,
+            shared_yaxes=True,
+            subplot_titles=(
+                "Signal Score",
+                "Peak Avg Flow (MWh)",
+                "Consistency",
+            ),
+            horizontal_spacing=0.06,
+        )
+        fig.add_trace(
+            go.Bar(
+                x=top8["signal_score"],
+                y=top8["route"],
+                orientation="h",
+                marker_color=C_SECONDARY,
+                showlegend=False,
+                text=top8["signal_score"].round(1),
+                textposition="outside",
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Bar(
+                x=top8["peak_avg_flow"].abs(),
+                y=top8["route"],
+                orientation="h",
+                marker_color=np.where(top8["peak_avg_flow"] > 0, C_GREEN, C_RED),
+                showlegend=False,
+                text=top8["peak_avg_flow"].round(0).astype(int),
+                textposition="outside",
+            ),
+            row=1,
+            col=2,
+        )
+        cons = top8.get(
+            "consistency",
+            pd.Series([0.5] * len(top8)),
+        )
+        fig.add_trace(
+            go.Bar(
+                x=cons,
+                y=top8["route"],
+                orientation="h",
+                marker_color=C_ACCENT,
+                showlegend=False,
+                text=cons.round(2),
+                textposition="outside",
+            ),
+            row=1,
+            col=3,
+        )
+        fig.update_layout(yaxis=dict(categoryorder="total ascending"))
+        _style(fig, h=420)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Table
+        st.subheader(
+            "Signal Details",
+            help=("Direction: net flow direction. Volatility: lower = more consistent."),
+        )
+        tbl = disp[
+            [
+                "route",
+                "direction",
+                "peak_avg_flow",
+                "peak_volatility",
+                "signal_score",
+            ]
+        ].copy()
+        tbl.columns = [
+            "Route",
+            "Direction",
+            "Avg Flow (MWh)",
+            "Volatility",
+            "Score",
+        ]
+        st.dataframe(
+            tbl.style.format(
+                {
+                    "Avg Flow (MWh)": "{:,.0f}",
+                    "Volatility": "{:,.0f}",
+                    "Score": "{:.1f}",
+                }
+            ).background_gradient(subset=["Score"], cmap="Blues"),
+            use_container_width=True,
+            hide_index=True,
         )
 
-        # Filter to rows with the chosen metric
-        plot_df = geo_summary.dropna(subset=[metric_option])
+        st.markdown("---")
 
-        if plot_df.empty:
-            st.warning(f"No data for metric: {metric_option}")
-        else:
-            fig = px.scatter_geo(
-                plot_df,
+        # Heatmap
+        st.subheader(
+            "24-Hour Flow Heatmap",
+            help=("Red = export, Blue = import. Shaded band = NERC peak hours."),
+        )
+        patterns = compute_interchange_patterns(_D["interchange"])
+        if not patterns.empty:
+            top_p = signals.head(8)
+            rows_h = []
+            for _, sr in top_p.iterrows():
+                p = patterns[
+                    (patterns["fromba"] == sr["fromba"]) & (patterns["toba"] == sr["toba"])
+                ]
+                for _, pp in p.iterrows():
+                    rows_h.append(
+                        {
+                            "Route": (f"{sr['fromba']}→{sr['toba']}"),
+                            "Hour": int(pp["hour"]),
+                            "Flow": pp["avg_flow"],
+                        }
+                    )
+            if rows_h:
+                hdf = pd.DataFrame(rows_h)
+                hpiv = hdf.pivot_table(
+                    index="Route",
+                    columns="Hour",
+                    values="Flow",
+                )
+                mx = max(
+                    abs(hpiv.to_numpy().min()),
+                    abs(hpiv.to_numpy().max()),
+                    1,
+                )
+                fig_h = px.imshow(
+                    hpiv,
+                    color_continuous_scale="RdBu_r",
+                    zmin=-mx,
+                    zmax=mx,
+                    aspect="auto",
+                    labels={"x": "Hour", "color": "MWh"},
+                )
+                fig_h.add_vrect(
+                    x0=NERC_PEAK_START - 0.5,
+                    x1=NERC_PEAK_END + 0.5,
+                    fillcolor="rgba(0,0,0,0.05)",
+                    line_width=2,
+                    line_color=C_SLATE,
+                    line_dash="dot",
+                    annotation_text="NERC Peak",
+                    annotation_position="top",
+                    annotation_font=dict(size=10, color=C_SLATE),
+                )
+                fig_h.update_layout(
+                    yaxis_title="",
+                    coloraxis_colorbar_title="MWh",
+                )
+                _style(fig_h, h=380)
+                st.plotly_chart(fig_h, use_container_width=True)
+
+        st.markdown("---")
+
+        # Route detail
+        st.subheader(
+            "Route Profile",
+            help="Shaded region = NERC peak hours.",
+        )
+        pair_opts = [f"{r['fromba']} → {r['toba']}" for _, r in signals.head(10).iterrows()]
+        sel_pair = st.selectbox("Select route", pair_opts)
+        if sel_pair:
+            parts = sel_pair.split(" → ")
+            prof = get_pair_hourly_profile(_D["interchange"], parts[0], parts[1])
+            if not prof.empty:
+                fig_p = go.Figure()
+                fig_p.add_vrect(
+                    x0=NERC_PEAK_START - 0.5,
+                    x1=NERC_PEAK_END + 0.5,
+                    fillcolor="rgba(8,145,178,0.08)",
+                    line_width=0,
+                    annotation_text="Peak",
+                    annotation_position="top left",
+                    annotation_font=dict(size=10, color=C_ACCENT),
+                )
+                fig_p.add_trace(
+                    go.Bar(
+                        x=prof["hour"],
+                        y=prof["avg_flow"],
+                        marker_color=[C_PRIMARY if v > 0 else C_RED for v in prof["avg_flow"]],
+                        marker_line_width=0,
+                        hovertemplate=("%{x}:00 — %{y:,.0f} MWh<extra></extra>"),
+                    )
+                )
+                fig_p.add_hline(y=0, line_color=C_GRID)
+                fig_p.update_layout(
+                    xaxis_title="Hour of Day",
+                    yaxis_title="Avg Flow (MWh)",
+                    title=sel_pair,
+                    bargap=0.15,
+                )
+                _style(fig_p, h=380)
+                st.plotly_chart(fig_p, use_container_width=True)
+
+    st.caption(f"Loaded in {time.time() - t0:.2f}s")
+
+
+# ===================================================================
+# 🌱 RENEWABLE SITING
+# ===================================================================
+elif page == "🌱 Renewable Siting":
+    t0 = time.time()
+    st.title("🌱 Renewable Investment Scoring")
+    st.markdown(
+        "Composite scoring of clean energy investment opportunity by region.",
+        help=(
+            "Each BA scored 0–100 on four equally weighted "
+            "factors: (1) Demand growth, (2) Renewable "
+            "headroom, (3) Import dependence, "
+            "(4) Fossil transition opportunity."
+        ),
+    )
+    scores = compute_renewable_siting_scores(_D["demand"], _D["fuel"], _D["interchange"])
+    if scores.empty:
+        st.info("Insufficient data.")
+    else:
+        st.subheader(
+            "Composite Ranking",
+            help="Higher score = greater opportunity.",
+        )
+        s = scores.sort_values("composite_score")
+        fig = go.Figure(
+            go.Bar(
+                x=s["composite_score"],
+                y=s["name"],
+                orientation="h",
+                marker=dict(
+                    color=s["composite_score"],
+                    colorscale=[
+                        [0, "#d1fae5"],
+                        [1, C_GREEN],
+                    ],
+                    line_width=0,
+                ),
+                text=s["composite_score"].round(1),
+                textposition="outside",
+                textfont=dict(size=12),
+            )
+        )
+        fig.update_layout(
+            xaxis_title="Score (0–100)",
+            yaxis_title="",
+            showlegend=False,
+        )
+        _style(fig, h=440)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Radar + Table side by side
+        col_r, col_t = st.columns([1, 1])
+        with col_r:
+            st.subheader(
+                f"Score Profile — {sel_ba}",
+                help=("Radar shows four scoring dimensions. Larger shape = stronger opportunity."),
+            )
+            ba_s = scores[scores["ba"] == sel_ba]
+            if not ba_s.empty:
+                cats = [
+                    "Demand Growth",
+                    "Renewable Headroom",
+                    "Import Dependence",
+                    "Fossil Transition",
+                ]
+                vals = [
+                    ba_s["demand_growth_score"].iloc[0],
+                    ba_s["renewable_headroom_score"].iloc[0],
+                    ba_s["import_dependence_score"].iloc[0],
+                    ba_s["fossil_transition_score"].iloc[0],
+                ]
+                fig_r = go.Figure(
+                    go.Scatterpolar(
+                        r=vals + [vals[0]],
+                        theta=cats + [cats[0]],
+                        fill="toself",
+                        fillcolor="rgba(5,150,105,0.12)",
+                        line=dict(color=C_GREEN, width=2),
+                    )
+                )
+                fig_r.update_layout(
+                    polar=dict(
+                        radialaxis=dict(
+                            visible=True,
+                            range=[0, 100],
+                        ),
+                        bgcolor="white",
+                    ),
+                    showlegend=False,
+                )
+                _style(fig_r, h=380)
+                st.plotly_chart(fig_r, use_container_width=True)
+
+        with col_t:
+            st.subheader("All Scores")
+            num_cols = scores.select_dtypes("number").columns
+            fmt = {c: "{:.1f}" for c in num_cols}
+            st.dataframe(
+                scores[
+                    [
+                        "ba",
+                        "name",
+                        "composite_score",
+                        "demand_growth_score",
+                        "renewable_headroom_score",
+                        "import_dependence_score",
+                        "fossil_transition_score",
+                        "current_renewable_pct",
+                    ]
+                ]
+                .style.format(fmt)
+                .background_gradient(
+                    subset=["composite_score"],
+                    cmap="Greens",
+                ),
+                use_container_width=True,
+                hide_index=True,
+                height=400,
+            )
+
+        # Map
+        st.subheader(
+            "Regional Map",
+            help=("Bubble size and colour represent the composite score."),
+        )
+        geo = build_geographic_summary(_D["demand"], _D["interchange"], _D["fuel"])
+        if not geo.empty:
+            geo = geo.merge(
+                scores[["ba", "composite_score"]],
+                on="ba",
+                how="left",
+            )
+            gp = geo.dropna(subset=["composite_score"])
+            fig_m = px.scatter_geo(
+                gp,
                 lat="lat",
                 lon="lon",
-                size=plot_df[metric_option].abs(),
-                color=metric_option,
+                size="composite_score",
+                color="composite_score",
                 hover_name="name",
+                color_continuous_scale=[
+                    [0, "#d1fae5"],
+                    [0.5, "#34d399"],
+                    [1, "#065f46"],
+                ],
+                size_max=30,
                 hover_data={
-                    "ba": True,
-                    "mape": ":.2f",
-                    "avg_demand": ":.0f",
-                    "renewable_share": ":.1f",
                     "lat": False,
                     "lon": False,
+                    "composite_score": ":.1f",
                 },
-                title=f"US Balancing Authorities — {metric_option}",
-                color_continuous_scale="Viridis",
             )
-            fig.update_geos(
+            fig_m.update_geos(
                 scope="usa",
                 showlakes=True,
-                lakecolor="rgb(200, 220, 255)",
+                lakecolor="#f1f5f9",
+                landcolor="#fafafa",
+                showland=True,
             )
-            fig.update_layout(height=600)
-            st.plotly_chart(fig, use_container_width=True)
+            fig_m.update_layout(
+                coloraxis_colorbar_title="Score",
+                geo=dict(bgcolor="white"),
+            )
+            _style(fig_m, h=460)
+            st.plotly_chart(fig_m, use_container_width=True)
 
-        # Summary table
-        st.subheader("Regional Summary Table")
-        display_cols = [
-            c
-            for c in [
-                "ba",
-                "name",
-                "mape",
-                "avg_demand",
-                "avg_net_interchange",
-                "renewable_share",
-            ]
-            if c in geo_summary.columns
-        ]
-        styled = geo_summary[display_cols].copy()
-        st.dataframe(
-            styled.style.format(
-                {
-                    "mape": "{:.2f}%",
-                    "avg_demand": "{:,.0f}",
-                    "avg_net_interchange": "{:,.0f}",
-                    "renewable_share": "{:.1f}%",
-                },
-                na_rep="—",
-            ),
-            use_container_width=True,
-        )
-
-    elapsed = time.time() - start_time
-    st.caption(f"Page loaded in {elapsed:.2f} seconds")
+    st.caption(f"Loaded in {time.time() - t0:.2f}s")
 
 
-# ==========================================
-# PAGE 6: Research & Methodology
-# ==========================================
-elif page == "📄 Research & Methodology":
-    start_time = time.time()
-    st.title("📄 Research & Methodology")
-    st.caption("Course Project | SIPA Advanced Computing for Policy")
-
-    st.header("Research Question")
+# ===================================================================
+# 📋 COMPLIANCE REPORTS
+# ===================================================================
+elif page == "📋 Compliance Reports":
+    t0 = time.time()
+    st.title("📋 Compliance Reports")
     st.markdown(
-        """
-        **How do power systems respond to uncertainty and shocks?**
-
-        We investigate this through three analytical dimensions:
-        """
+        f"Automated regulatory summary for **{BA_NAMES[sel_ba]}**.",
+        help=("FERC-style operational summary from EIA Form 930 data. Change BA in sidebar."),
     )
+    report = generate_compliance_summary(
+        _D["demand"],
+        _D["interchange"],
+        _D["fuel"],
+        sel_ba,
+    )
+    sec = report["sections"]
 
-    dim_cols = st.columns(3)
-    with dim_cols[0]:
-        st.markdown(
-            """
-            #### 🎯 Forecast Uncertainty
-            How accurate are day-ahead demand forecasts?
-            When and where do the largest errors occur?
-            How does temperature affect prediction accuracy?
-            """
-        )
-    with dim_cols[1]:
-        st.markdown(
-            """
-            #### 🔄 System Flexibility
-            Do balancing authorities rely more on interregional
-            power imports during high-demand periods?
-            What are the intra-day patterns of power trade?
-            """
-        )
-    with dim_cols[2]:
-        st.markdown(
-            """
-            #### ⛽ Fuel Substitution
-            How does the generation mix shift when natural gas
-            prices change? Which fuels serve as substitutes?
-            Do regions differ in their fuel switching behavior?
-            """
-        )
-
+    hc1, hc2 = st.columns([3, 1])
+    hc1.markdown(f"## {report['ba']} — {report['ba_name']}")
+    if "demand" in sec:
+        hc2.caption(f"{sec['demand']['period_start'][:10]} to {sec['demand']['period_end'][:10]}")
     st.markdown("---")
 
-    st.header("Data Sources")
+    c1, c2 = st.columns(2)
+    with c1:
+        if "demand" in sec:
+            d = sec["demand"]
+            st.subheader(
+                "§1 Demand",
+                help="Hourly demand statistics.",
+            )
+            m1, m2 = st.columns(2)
+            m1.metric(
+                "Avg Demand",
+                f"{d['avg_demand_mwh']:,.0f} MWh",
+            )
+            m2.metric(
+                "Peak Demand",
+                f"{d['peak_demand_mwh']:,.0f} MWh",
+            )
+            m3, m4 = st.columns(2)
+            m3.metric(
+                "Min Demand",
+                f"{d['min_demand_mwh']:,.0f} MWh",
+            )
+            m4.metric("Hours Reported", f"{d['total_hours']:,}")
+
+    with c2:
+        if "forecast_accuracy" in sec:
+            fa = sec["forecast_accuracy"]
+            st.subheader(
+                "§2 Forecast Accuracy",
+                help=("MAPE: lower = better. Bias: positive = demand > forecast."),
+            )
+            m1, m2 = st.columns(2)
+            m1.metric("MAPE", f"{fa['mape']:.2f}%")
+            m2.metric("MAE", f"{fa['mae_mwh']:,.0f} MWh")
+            m3, m4 = st.columns(2)
+            m3.metric(
+                "Max Error",
+                f"{fa['max_error_mwh']:,.0f} MWh",
+            )
+            m4.metric("Bias", f"{fa['bias_mwh']:,.0f} MWh")
+
+    st.markdown("---")
+    c3, c4 = st.columns(2)
+    with c3:
+        if "interchange" in sec:
+            ix = sec["interchange"]
+            st.subheader(
+                "§3 Interchange",
+                help=("Positive = net export. Negative = net import."),
+            )
+            m1, m2 = st.columns(2)
+            m1.metric("Avg Net", f"{ix['avg_net_mwh']:,.0f} MWh")
+            m2.metric("Partners", f"{ix['n_trading_partners']}")
+            m3, m4 = st.columns(2)
+            m3.metric(
+                "Peak Export",
+                f"{ix['peak_export_mwh']:,.0f} MWh",
+            )
+            m4.metric(
+                "Peak Import",
+                f"{ix['peak_import_mwh']:,.0f} MWh",
+            )
+
+    with c4:
+        if "generation_mix" in sec:
+            gm = sec["generation_mix"]
+            st.subheader(
+                "§4 Generation Mix",
+                help="Fuel shares in total generation.",
+            )
+            if gm["fuel_shares_pct"]:
+                mix_df = pd.DataFrame(
+                    [
+                        {
+                            "Fuel": FUEL_LABELS.get(k, k),
+                            "Share": v,
+                        }
+                        for k, v in gm["fuel_shares_pct"].items()
+                    ]
+                ).sort_values("Share", ascending=True)
+                fig = go.Figure(
+                    go.Bar(
+                        x=mix_df["Share"],
+                        y=mix_df["Fuel"],
+                        orientation="h",
+                        marker_color=[FUEL_COLORS.get(f, "#94a3b8") for f in mix_df["Fuel"]],
+                        text=[f"{v:.1f}%" for v in mix_df["Share"]],
+                        textposition="outside",
+                        textfont=dict(size=11),
+                    )
+                )
+                fig.update_layout(
+                    xaxis_title="Share (%)",
+                    yaxis_title="",
+                    showlegend=False,
+                )
+                _style(fig, h=280)
+                st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.caption("Auto-generated from EIA Form 930 data. Verify against primary sources for filings.")
+    st.caption(f"Loaded in {time.time() - t0:.2f}s")
+
+
+# ===================================================================
+# 📊 MARKET OVERVIEW
+# ===================================================================
+elif page == "📊 Market Overview":
+    t0 = time.time()
+    st.title("📊 Market Overview")
+    st.markdown(
+        f"Operational snapshot for **{BA_NAMES[sel_ba]}**.",
+        help=("Demand, forecast accuracy, generation mix, interchange, and energy prices."),
+    )
+    pivot = prepare_demand_pivot(_D["demand"], sel_ba)
+    actual, forecast, delta = calculate_grid_kpis(pivot)
+
+    if actual is not None:
+        kc = st.columns(4)
+        kc[0].metric("Latest Demand", f"{actual:,.0f} MWh")
+        kc[1].metric("Forecast", f"{forecast:,.0f} MWh")
+        kc[2].metric(
+            "Error",
+            f"{delta:,.0f} MWh",
+            delta_color="inverse",
+        )
+        rk = _D["ranking"]
+        br = rk[rk["ba"] == sel_ba] if not rk.empty else pd.DataFrame()
+        if not br.empty:
+            kc[3].metric("MAPE", f"{br['mape'].iloc[0]:.2f}%")
+    st.markdown("---")
+
+    # Demand + Error subplot
+    st.subheader(
+        f"Demand & Forecast — Last {days} Days",
+        help=("Top: actual vs forecast. Bottom: hourly error bars."),
+    )
+    if not pivot.empty:
+        dd = pivot.head(days * 24).sort_index()
+        cols_ok = {
+            "Demand",
+            "Day-ahead demand forecast",
+        }.issubset(dd.columns)
+        if cols_ok:
+            fig = make_subplots(
+                rows=2,
+                cols=1,
+                shared_xaxes=True,
+                row_heights=[0.65, 0.35],
+                vertical_spacing=0.04,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=dd.index,
+                    y=dd["Demand"],
+                    name="Actual",
+                    line=dict(color=C_PRIMARY, width=2),
+                ),
+                row=1,
+                col=1,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=dd.index,
+                    y=dd["Day-ahead demand forecast"],
+                    name="Forecast",
+                    line=dict(
+                        color=C_AMBER,
+                        width=2,
+                        dash="dash",
+                    ),
+                ),
+                row=1,
+                col=1,
+            )
+            if "Forecast Error" in dd.columns:
+                fig.add_trace(
+                    go.Bar(
+                        x=dd.index,
+                        y=dd["Forecast Error"],
+                        name="Error",
+                        marker_color=np.where(
+                            dd["Forecast Error"] > 0,
+                            "rgba(220,38,38,0.5)",
+                            "rgba(30,64,175,0.5)",
+                        ),
+                    ),
+                    row=2,
+                    col=1,
+                )
+                fig.add_hline(
+                    y=0,
+                    line_color=C_GRID,
+                    row=2,
+                    col=1,
+                )
+            fig.update_yaxes(title_text="MWh", row=1, col=1)
+            fig.update_yaxes(title_text="Error", row=2, col=1)
+            _style(fig, h=520)
+            st.plotly_chart(fig, use_container_width=True)
+
+    # Gen mix + Interchange
+    cg, ci = st.columns(2)
+    with cg:
+        st.subheader(
+            "Generation Mix",
+            help="Daily average generation by fuel.",
+        )
+        mix = compute_generation_mix(_D["fuel"], sel_ba)
+        if not mix.empty:
+            mc = mix.copy()
+            mc["Fuel"] = mc["fueltype"].map(FUEL_LABELS)
+            fig2 = px.area(
+                mc,
+                x="date",
+                y="avg_generation_mwh",
+                color="Fuel",
+                labels={
+                    "avg_generation_mwh": "MWh",
+                    "date": "",
+                },
+                color_discrete_map=FUEL_COLORS,
+            )
+            _style(fig2, h=380)
+            st.plotly_chart(fig2, use_container_width=True)
+
+    with ci:
+        st.subheader(
+            "Net Interchange",
+            help=("Positive = export. Negative = import from neighbors."),
+        )
+        net = compute_net_interchange(_D["interchange"], sel_ba)
+        if not net.empty:
+            rec = net.tail(days * 24)
+            fig3 = go.Figure(
+                go.Scatter(
+                    x=rec["period"],
+                    y=rec["net_interchange_mwh"],
+                    fill="tozeroy",
+                    fillcolor="rgba(8,145,178,0.08)",
+                    line=dict(color=C_ACCENT, width=1.5),
+                )
+            )
+            fig3.add_hline(y=0, line_color=C_GRID)
+            fig3.update_layout(xaxis_title="", yaxis_title="MWh")
+            _style(fig3, h=380)
+            st.plotly_chart(fig3, use_container_width=True)
+
+    # NG price
+    st.subheader(
+        "Natural Gas Price",
+        help="Henry Hub spot price ($/MMBtu).",
+    )
+    ng = _D["ng_price"]
+    if not ng.empty:
+        fig4 = go.Figure(
+            go.Scatter(
+                x=ng["date"],
+                y=ng["ng_price"],
+                line=dict(color=C_AMBER, width=2),
+                fill="tozeroy",
+                fillcolor="rgba(217,119,6,0.06)",
+            )
+        )
+        fig4.update_layout(xaxis_title="", yaxis_title="$/MMBtu")
+        _style(fig4, h=300)
+        st.plotly_chart(fig4, use_container_width=True)
+
+    st.caption(f"Loaded in {time.time() - t0:.2f}s")
+
+
+# ===================================================================
+# 📄 ABOUT
+# ===================================================================
+elif page == "📄 About":
+    t0 = time.time()
+    st.title("Grid Intelligence Platform")
+    st.caption("SIPA Advanced Computing for Policy — Columbia University")
     st.markdown(
         """
-        | Source | Endpoint | Frequency | Coverage |
-        |--------|----------|-----------|----------|
-        | EIA Demand & Forecast | `electricity/rto/region-data` | Hourly | 10 major BAs |
-        | EIA Interchange | `electricity/rto/interchange-data` | Hourly | BA-to-BA flows |
-        | EIA Generation by Fuel | `electricity/rto/fuel-type-data` | Hourly | By fuel type |
-        | EIA Natural Gas Price | `natural-gas/pri/fut` | Daily | Henry Hub spot |
-        | Open-Meteo Weather | Archive API | Daily | Representative cities |
-        """
+---
+
+### Mission
+
+An open-source power market intelligence platform.
+We transform publicly available EIA data into
+**actionable signals** for energy professionals
+who need institutional-grade analytics without
+institutional budgets.
+
+---
+
+### Data Pipeline
+
+**EIA / Open-Meteo APIs → Google BigQuery → Streamlit**
+
+| Source | Endpoint | Freq |
+|--------|----------|------|
+| Demand & Forecast | `rto/region-data` | Hourly |
+| Interchange | `rto/interchange-data` | Hourly |
+| Generation by Fuel | `rto/fuel-type-data` | Hourly |
+| Natural Gas Price | `pri/fut` | Daily |
+| Weather | Open-Meteo Archive | Daily |
+
+---
+
+### Limitations
+
+- EIA data has a 1–2 hour reporting delay
+- No real-time LMP node pricing
+- Weather uses one city per BA region
+- Arbitrage signals reflect flow patterns,
+  not guaranteed spreads
+
+---
+
+### Team
+
+**Xingyi Wang & Wuhao Xia** — Columbia SIPA
+"""
     )
-
-    st.header("Balancing Authorities Covered")
-    ba_table = pd.DataFrame([{"Code": k, "Name": v} for k, v in BA_NAMES.items()])
-    st.dataframe(ba_table, use_container_width=True, hide_index=True)
-
-    st.header("Methodology")
-    st.markdown(
-        """
-        **Forecast Uncertainty**: We compute Mean Absolute Percentage Error (MAPE),
-        Mean Absolute Error (MAE), and hourly error patterns across all balancing
-        authorities. Temperature sensitivity is assessed through scatter analysis
-        with OLS trend lines.
-
-        **System Flexibility**: Net interchange is computed by summing all flows
-        from a BA to its neighbors. We analyze correlation between demand levels
-        and net imports, and identify hour-of-day patterns.
-
-        **Fuel Substitution**: We track the daily generation share of each fuel type
-        and overlay Henry Hub natural gas spot prices. Price-generation elasticity
-        is estimated via cross-sectional scatter analysis across fuel types.
-        """
-    )
-
-    st.header("Limitations")
-    st.markdown(
-        """
-        - Not all BAs report consistently across all data types
-        - Weather data uses single representative cities per BA region
-        - Henry Hub price is a national proxy; regional gas prices may differ
-        - Hourly data may contain gaps or reporting delays from EIA
-        - Fuel substitution analysis assumes contemporaneous response;
-          actual switching may involve lags
-        """
-    )
-
-    st.header("Team")
-    st.markdown("**Xingyi Wang & Wuhao Xia** — SIPA, Columbia University")
-
-    elapsed = time.time() - start_time
-    st.caption(f"Page loaded in {elapsed:.2f} seconds")
+    st.caption(f"Loaded in {time.time() - t0:.2f}s")

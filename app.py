@@ -1079,10 +1079,15 @@ elif page == "📄 About":
         """
         # ⚡ Grid Intelligence Platform
 
-        **Open-source power market intelligence for monitoring U.S. electricity system behavior across major balancing authorities**
+        **Open-source power market intelligence for U.S. balancing authorities**
 
-        This project turns public electricity system data into practical, decision-oriented analytics.  
-        The platform is designed to help users understand grid conditions, forecast performance, interregional electricity flows, and renewable energy opportunities without relying on proprietary market intelligence tools.
+        This project turns public electricity system data into practical,
+        decision-oriented analytics.
+
+        The platform helps users understand grid conditions, forecast
+        performance, interregional electricity flows, and renewable
+        energy opportunities without relying on proprietary market
+        intelligence tools.
 
         ---
         ## What this platform does
@@ -1102,11 +1107,17 @@ elif page == "📄 About":
 
         It is organized around five analytical modules:
 
-        1. **Market Overview** — latest demand, forecast accuracy, generation mix, interchange, and gas price context  
-        2. **Anomaly Detection** — identifies unusually large demand forecast errors relative to historical patterns  
-        3. **Arbitrage Signals** — detects persistent directional interchange flows that may indicate cross-market imbalance  
-        4. **Renewable Siting** — scores regions on demand growth, renewable headroom, import dependence, and fossil transition opportunity  
-        5. **Compliance Reports** — generates structured balancing-authority-level operational summaries
+        1. **Market Overview** — latest demand, forecast accuracy,
+           generation mix, interchange, and gas price context
+        2. **Anomaly Detection** — identifies unusually large demand
+           forecast errors relative to historical patterns
+        3. **Arbitrage Signals** — detects persistent directional
+           interchange flows that may indicate cross-market imbalance
+        4. **Renewable Siting** — scores regions on demand growth,
+           renewable headroom, import dependence, and fossil
+           transition opportunity
+        5. **Compliance Reports** — generates structured
+           balancing-authority-level operational summaries
 
         ---
         ## Data sources
@@ -1116,7 +1127,8 @@ elif page == "📄 About":
         ### 1) EIA Demand & Forecast
         - **Endpoint:** `electricity/rto/region-data`
         - **Frequency:** Hourly
-        - **Content:** Actual demand and day-ahead demand forecast by balancing authority
+        - **Content:** Actual demand and day-ahead demand forecast by
+          balancing authority
 
         ### 2) EIA Interchange
         - **Endpoint:** `electricity/rto/interchange-data`
@@ -1136,23 +1148,25 @@ elif page == "📄 About":
         ### 5) Open-Meteo Weather
         - **API:** Archive weather API
         - **Frequency:** Daily
-        - **Content:** Daily max, min, and average temperature for representative BA locations
+        - **Content:** Daily max, min, and average temperature for
+          representative BA locations
 
         Fuel categories tracked in the generation dataset include:
 
-        - **NG** — Natural Gas  
-        - **SUN** — Solar  
-        - **WND** — Wind  
-        - **NUC** — Nuclear  
-        - **COL** — Coal  
-        - **WAT** — Hydro  
-        - **OIL** — Oil  
+        - **NG** — Natural Gas
+        - **SUN** — Solar
+        - **WND** — Wind
+        - **NUC** — Nuclear
+        - **COL** — Coal
+        - **WAT** — Hydro
+        - **OIL** — Oil
         - **OTH** — Other
 
         ---
         ## Datasets used in the app
 
-        The ETL pipeline writes data into the BigQuery dataset **`eia_data`** in project **`sipa-adv-c-silly-penguin`**.
+        The ETL pipeline writes data into the BigQuery dataset
+        **`eia_data`** in project **`sipa-adv-c-silly-penguin`**.
 
         ### Raw datasets
         - `hourly_demand`
@@ -1167,7 +1181,8 @@ elif page == "📄 About":
         - `daily_fuel_summary`
         - `ba_mape_ranking`
 
-        The Streamlit app currently reads the main raw tables plus the ranking table directly into memory for dashboard use.
+        The Streamlit app reads the main raw tables plus the ranking
+        table directly into memory for dashboard use.
 
         ---
         ## Data pipeline
@@ -1182,22 +1197,32 @@ elif page == "📄 About":
         - writes raw data into BigQuery
         - creates pre-computed summary tables for faster analysis
 
-        The ETL uses a rolling **3-month window** and performs a **full refresh** rather than append logic.
+        The ETL uses a rolling **3-month window** and performs a
+        **full refresh** rather than append logic.
 
         ### Stage 2: Dashboard loading
-        The Streamlit app loads all major datasets once at startup using `st.cache_resource`, then serves all pages from in-memory DataFrames for faster navigation across modules.
+        The Streamlit app loads all major datasets once at startup
+        using `st.cache_resource`, then serves all pages from
+        in-memory DataFrames for faster navigation across modules.
 
         ---
         ## Methodology
 
         ### Forecast Error Monitoring
-        The anomaly module compares actual demand with day-ahead demand forecast, calculates forecast error, and flags balancing authorities whose recent errors exceed their own historical thresholds.
+        The anomaly module compares actual demand with day-ahead
+        demand forecast, calculates forecast error, and flags
+        balancing authorities whose recent errors exceed their own
+        historical thresholds.
 
         ### Interchange-Based Arbitrage Signals
-        The arbitrage module evaluates BA-to-BA interchange routes using directional strength and consistency, highlighting persistent peak-hour flow patterns that may reflect market imbalance.
+        The arbitrage module evaluates BA-to-BA interchange routes
+        using directional strength and consistency. It highlights
+        persistent peak-hour flow patterns that may reflect market
+        imbalance.
 
         ### Renewable Siting Score
-        Renewable investment opportunity is scored using four equal components:
+        Renewable investment opportunity is scored using four equal
+        components:
         - demand growth
         - renewable headroom
         - import dependence
@@ -1215,11 +1240,15 @@ elif page == "📄 About":
         ---
         ## Limitations
 
-        - EIA data is public operational data, not full real-time market pricing data
+        - EIA data is public operational data, not full real-time
+          market pricing data
         - The platform does **not** include nodal LMP prices
-        - Weather is represented by one reference location per balancing authority
-        - Arbitrage signals reflect flow patterns rather than confirmed price spreads
-        - The rolling 3-month window is better for short-horizon operational analysis than long-term structural inference
+        - Weather is represented by one reference location per
+          balancing authority
+        - Arbitrage signals reflect flow patterns rather than
+          confirmed price spreads
+        - The rolling 3-month window is better for short-horizon
+          operational analysis than long-term structural inference
 
         ---
         ## Tech stack
@@ -1233,7 +1262,7 @@ elif page == "📄 About":
         ---
         ## Team
 
-        **Xingyi Wang & Wuhao Xia**  
+        **Xingyi Wang & Wuhao Xia**
         Columbia SIPA — Advanced Computing for Policy
         """
     )

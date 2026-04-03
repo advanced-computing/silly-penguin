@@ -1073,49 +1073,169 @@ elif page == "📊 Market Overview":
 # ===================================================================
 elif page == "📄 About":
     t0 = time.time()
-    st.title("Grid Intelligence Platform")
-    st.caption("SIPA Advanced Computing for Policy — Columbia University")
+    st.title("📄 About")
+
     st.markdown(
         """
----
+        # ⚡ Grid Intelligence Platform
 
-### Mission
+        **Open-source power market intelligence for monitoring U.S. electricity system behavior across major balancing authorities**
 
-An open-source power market intelligence platform.
-We transform publicly available EIA data into
-**actionable signals** for energy professionals
-who need institutional-grade analytics without
-institutional budgets.
+        This project turns public electricity system data into practical, decision-oriented analytics.  
+        The platform is designed to help users understand grid conditions, forecast performance, interregional electricity flows, and renewable energy opportunities without relying on proprietary market intelligence tools.
 
----
+        ---
+        ## What this platform does
 
-### Data Pipeline
+        The dashboard analyzes **10 major U.S. balancing authorities (BAs)**:
 
-**EIA / Open-Meteo APIs → Google BigQuery → Streamlit**
+        - **CISO** — California ISO
+        - **ERCO** — ERCOT (Texas)
+        - **PJM** — PJM Interconnection
+        - **MISO** — Midcontinent ISO
+        - **NYIS** — New York ISO
+        - **ISNE** — ISO New England
+        - **SWPP** — Southwest Power Pool
+        - **SOCO** — Southern Company
+        - **TVA** — Tennessee Valley Authority
+        - **BPAT** — Bonneville Power Administration
 
-| Source | Endpoint | Freq |
-|--------|----------|------|
-| Demand & Forecast | `rto/region-data` | Hourly |
-| Interchange | `rto/interchange-data` | Hourly |
-| Generation by Fuel | `rto/fuel-type-data` | Hourly |
-| Natural Gas Price | `pri/fut` | Daily |
-| Weather | Open-Meteo Archive | Daily |
+        It is organized around five analytical modules:
 
----
+        1. **Market Overview** — latest demand, forecast accuracy, generation mix, interchange, and gas price context  
+        2. **Anomaly Detection** — identifies unusually large demand forecast errors relative to historical patterns  
+        3. **Arbitrage Signals** — detects persistent directional interchange flows that may indicate cross-market imbalance  
+        4. **Renewable Siting** — scores regions on demand growth, renewable headroom, import dependence, and fossil transition opportunity  
+        5. **Compliance Reports** — generates structured balancing-authority-level operational summaries
 
-### Limitations
+        ---
+        ## Data sources
 
-- EIA data has a 1–2 hour reporting delay
-- No real-time LMP node pricing
-- Weather uses one city per BA region
-- Arbitrage signals reflect flow patterns,
-  not guaranteed spreads
+        This app integrates **five external source datasets**:
 
----
+        ### 1) EIA Demand & Forecast
+        - **Endpoint:** `electricity/rto/region-data`
+        - **Frequency:** Hourly
+        - **Content:** Actual demand and day-ahead demand forecast by balancing authority
 
-### Team
+        ### 2) EIA Interchange
+        - **Endpoint:** `electricity/rto/interchange-data`
+        - **Frequency:** Hourly
+        - **Content:** Electricity flows between balancing authorities
 
-**Xingyi Wang & Wuhao Xia** — Columbia SIPA
-"""
+        ### 3) EIA Generation by Fuel Type
+        - **Endpoint:** `electricity/rto/fuel-type-data`
+        - **Frequency:** Hourly
+        - **Content:** Electricity generation by fuel category
+
+        ### 4) EIA Natural Gas Price
+        - **Endpoint:** `natural-gas/pri/fut`
+        - **Frequency:** Daily
+        - **Content:** Henry Hub natural gas prices
+
+        ### 5) Open-Meteo Weather
+        - **API:** Archive weather API
+        - **Frequency:** Daily
+        - **Content:** Daily max, min, and average temperature for representative BA locations
+
+        Fuel categories tracked in the generation dataset include:
+
+        - **NG** — Natural Gas  
+        - **SUN** — Solar  
+        - **WND** — Wind  
+        - **NUC** — Nuclear  
+        - **COL** — Coal  
+        - **WAT** — Hydro  
+        - **OIL** — Oil  
+        - **OTH** — Other
+
+        ---
+        ## Datasets used in the app
+
+        The ETL pipeline writes data into the BigQuery dataset **`eia_data`** in project **`sipa-adv-c-silly-penguin`**.
+
+        ### Raw datasets
+        - `hourly_demand`
+        - `hourly_interchange`
+        - `hourly_fuel_type`
+        - `daily_ng_price`
+        - `daily_weather`
+
+        ### Derived / summary datasets
+        - `daily_demand_summary`
+        - `daily_interchange_summary`
+        - `daily_fuel_summary`
+        - `ba_mape_ranking`
+
+        The Streamlit app currently reads the main raw tables plus the ranking table directly into memory for dashboard use.
+
+        ---
+        ## Data pipeline
+
+        The platform uses a **two-stage architecture**:
+
+        **External APIs → ETL pipeline → BigQuery → Streamlit dashboard**
+
+        ### Stage 1: ETL pipeline
+        The script `load_to_bigquery.py`:
+        - fetches source data from EIA and Open-Meteo
+        - writes raw data into BigQuery
+        - creates pre-computed summary tables for faster analysis
+
+        The ETL uses a rolling **3-month window** and performs a **full refresh** rather than append logic.
+
+        ### Stage 2: Dashboard loading
+        The Streamlit app loads all major datasets once at startup using `st.cache_resource`, then serves all pages from in-memory DataFrames for faster navigation across modules.
+
+        ---
+        ## Methodology
+
+        ### Forecast Error Monitoring
+        The anomaly module compares actual demand with day-ahead demand forecast, calculates forecast error, and flags balancing authorities whose recent errors exceed their own historical thresholds.
+
+        ### Interchange-Based Arbitrage Signals
+        The arbitrage module evaluates BA-to-BA interchange routes using directional strength and consistency, highlighting persistent peak-hour flow patterns that may reflect market imbalance.
+
+        ### Renewable Siting Score
+        Renewable investment opportunity is scored using four equal components:
+        - demand growth
+        - renewable headroom
+        - import dependence
+        - fossil transition opportunity
+
+        ### Validation
+        Source datasets are validated with Pandera schemas covering:
+        - demand data
+        - interchange data
+        - fuel type data
+        - natural gas prices
+        - weather data
+        - merged daily datasets
+
+        ---
+        ## Limitations
+
+        - EIA data is public operational data, not full real-time market pricing data
+        - The platform does **not** include nodal LMP prices
+        - Weather is represented by one reference location per balancing authority
+        - Arbitrage signals reflect flow patterns rather than confirmed price spreads
+        - The rolling 3-month window is better for short-horizon operational analysis than long-term structural inference
+
+        ---
+        ## Tech stack
+
+        - **Frontend:** Streamlit, Plotly
+        - **Pipeline:** Python ETL
+        - **Data warehouse:** Google BigQuery
+        - **Validation:** Pandera
+        - **Deployment:** Streamlit Cloud
+
+        ---
+        ## Team
+
+        **Xingyi Wang & Wuhao Xia**  
+        Columbia SIPA — Advanced Computing for Policy
+        """
     )
+
     st.caption(f"Loaded in {time.time() - t0:.2f}s")

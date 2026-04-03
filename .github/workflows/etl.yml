@@ -1,7 +1,6 @@
-cat > .github/workflows/etl.yml <<'EOF'
 name: Scheduled ETL to BigQuery
 
-on:
+"on":
   workflow_dispatch:
   push:
     branches:
@@ -41,4 +40,3 @@ jobs:
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
         run: |
           python load_to_bigquery.py
-EOF

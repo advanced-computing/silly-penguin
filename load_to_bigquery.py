@@ -1,5 +1,4 @@
-"""
-load_to_bigquery.py
+"""load_to_bigquery.py
 
 Pulls all EIA data sources, writes raw tables to BigQuery,
 then creates pre-aggregated daily tables for fast dashboard loading.
@@ -36,22 +35,33 @@ BQ_DATASET = "eia_data"
 # --------------------------------------------------
 # Write to BigQuery
 # --------------------------------------------------
-def write_to_bq(df, table_name: str) -> None:
+def write_to_bq(df, table_name: str) -> bool:
     """Write a DataFrame to BigQuery, replacing existing data."""
+    if df.empty:
+        print(f"  Skipped {table_name}: dataframe is empty")
+        return False
+
     destination = f"{BQ_DATASET}.{table_name}"
-    df.to_gbq(
-        destination_table=destination,
-        project_id=GCP_PROJECT,
-        if_exists="replace",
-    )
-    print(f"  Wrote {len(df)} rows to {GCP_PROJECT}.{destination}")
+    print(f"  Writing {len(df)} rows to {GCP_PROJECT}.{destination}")
+    print(f"  Columns: {df.columns.tolist()}")
+
+    try:
+        df.to_gbq(
+            destination_table=destination,
+            project_id=GCP_PROJECT,
+            if_exists="replace",
+        )
+        print(f"  Successfully wrote {len(df)} rows to {GCP_PROJECT}.{destination}")
+        return True
+    except Exception as e:
+        print(f"  Failed writing to {GCP_PROJECT}.{destination}: {e}")
+        raise
 
 
 def run_aggregation_sql(client: bigquery.Client) -> None:
     """Create pre-aggregated daily tables from raw hourly data."""
     dataset = f"{GCP_PROJECT}.{BQ_DATASET}"
 
-    # Daily demand summary: one row per (date, respondent)
     print("  Creating daily_demand_summary...")
     client.query(f"""
         CREATE OR REPLACE TABLE `{dataset}.daily_demand_summary` AS
@@ -67,7 +77,6 @@ def run_aggregation_sql(client: bigquery.Client) -> None:
         GROUP BY date, respondent, type_name
     """).result()
 
-    # Daily interchange summary: one row per (date, fromba)
     print("  Creating daily_interchange_summary...")
     client.query(f"""
         CREATE OR REPLACE TABLE `{dataset}.daily_interchange_summary` AS
@@ -82,7 +91,6 @@ def run_aggregation_sql(client: bigquery.Client) -> None:
         GROUP BY date, fromba
     """).result()
 
-    # Daily fuel mix summary: one row per (date, respondent, fueltype)
     print("  Creating daily_fuel_summary...")
     client.query(f"""
         CREATE OR REPLACE TABLE `{dataset}.daily_fuel_summary` AS
@@ -96,7 +104,6 @@ def run_aggregation_sql(client: bigquery.Client) -> None:
         GROUP BY date, respondent, fueltype
     """).result()
 
-    # BA MAPE ranking: one row per respondent
     print("  Creating ba_mape_ranking...")
     client.query(f"""
         CREATE OR REPLACE TABLE `{dataset}.ba_mape_ranking` AS
@@ -107,7 +114,11 @@ def run_aggregation_sql(client: bigquery.Client) -> None:
                 MAX(IF(type_name = 'Demand', avg_value, NULL)) AS demand,
                 MAX(IF(type_name = 'Day-ahead demand forecast', avg_value, NULL)) AS forecast
             FROM (
-                SELECT period, respondent, `type-name` AS type_name, value AS avg_value
+                SELECT
+                    period,
+                    respondent,
+                    `type-name` AS type_name,
+                    value AS avg_value
                 FROM `{dataset}.hourly_demand`
             )
             GROUP BY period, respondent
@@ -136,42 +147,50 @@ def main() -> None:
         msg = "EIA_API_KEY not found in environment. Set it in .env file."
         raise RuntimeError(msg)
 
-    # 1) Demand & Forecast
+    raw_write_success = {}
+
     print("1/5  Fetching demand data...")
     demand_df = fetch_demand_data(EIA_API_KEY)
-    if not demand_df.empty:
-        write_to_bq(demand_df, "hourly_demand")
+    print(f"  Demand rows fetched: {len(demand_df)}")
+    raw_write_success["hourly_demand"] = write_to_bq(demand_df, "hourly_demand")
 
-    # 2) Interchange
     print("2/5  Fetching interchange data...")
     interchange_df = fetch_interchange_data(EIA_API_KEY)
-    if not interchange_df.empty:
-        write_to_bq(interchange_df, "hourly_interchange")
+    print(f"  Interchange rows fetched: {len(interchange_df)}")
+    raw_write_success["hourly_interchange"] = write_to_bq(interchange_df, "hourly_interchange")
 
-    # 3) Generation by Fuel Type
     print("3/5  Fetching fuel type data...")
     fuel_df = fetch_fuel_type_data(EIA_API_KEY)
-    if not fuel_df.empty:
-        write_to_bq(fuel_df, "hourly_fuel_type")
+    print(f"  Fuel rows fetched: {len(fuel_df)}")
+    raw_write_success["hourly_fuel_type"] = write_to_bq(fuel_df, "hourly_fuel_type")
 
-    # 4) Natural Gas Prices
     print("4/5  Fetching natural gas prices...")
     ng_price_df = fetch_natural_gas_prices(EIA_API_KEY)
-    if not ng_price_df.empty:
-        write_to_bq(ng_price_df, "daily_ng_price")
+    print(f"  NG price rows fetched: {len(ng_price_df)}")
+    raw_write_success["daily_ng_price"] = write_to_bq(ng_price_df, "daily_ng_price")
 
-    # 5) Weather
     print("5/5  Fetching weather data...")
     weather_df = fetch_weather_data()
-    if not weather_df.empty:
-        write_to_bq(weather_df, "daily_weather")
+    print(f"  Weather rows fetched: {len(weather_df)}")
+    raw_write_success["daily_weather"] = write_to_bq(weather_df, "daily_weather")
 
-    # 6) Pre-aggregate
+    failed_or_empty = [k for k, v in raw_write_success.items() if not v]
+    if failed_or_empty:
+        print("Raw table update incomplete. Skipping aggregation.")
+        print(f"Tables not updated: {failed_or_empty}")
+        raise RuntimeError(
+            "One or more raw tables were empty or failed to update; aggregation skipped."
+        )
+
     print("6/6  Building aggregated tables...")
     client = bigquery.Client(project=GCP_PROJECT)
     run_aggregation_sql(client)
 
     print("All done!")
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":

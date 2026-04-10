@@ -131,40 +131,58 @@ def run_aggregation_sql(client: bigquery.Client) -> None:
 # Main
 # --------------------------------------------------
 def main() -> None:
-    """Fetch all data sources, load to BigQuery, then aggregate."""
     if not EIA_API_KEY:
-        msg = "EIA_API_KEY not found in environment. Set it in .env file."
-        raise RuntimeError(msg)
+        raise RuntimeError("EIA_API_KEY not found in environment. Set it in .env file.")
 
     # 1) Demand & Forecast
     print("1/5  Fetching demand data...")
     demand_df = fetch_demand_data(EIA_API_KEY)
     if not demand_df.empty:
+        print(f"  Demand rows: {len(demand_df)} | max period: {demand_df['period'].max()}")
         write_to_bq(demand_df, "hourly_demand")
+    else:
+        raise RuntimeError("Demand data fetch returned empty dataframe.")
 
     # 2) Interchange
     print("2/5  Fetching interchange data...")
     interchange_df = fetch_interchange_data(EIA_API_KEY)
     if not interchange_df.empty:
+        print(
+            f"  Interchange rows: {len(interchange_df)} | max period: {interchange_df['period'].max()}"
+        )
         write_to_bq(interchange_df, "hourly_interchange")
+    else:
+        raise RuntimeError("Interchange data fetch returned empty dataframe.")
 
     # 3) Generation by Fuel Type
     print("3/5  Fetching fuel type data...")
     fuel_df = fetch_fuel_type_data(EIA_API_KEY)
     if not fuel_df.empty:
+        print(f"  Fuel rows: {len(fuel_df)} | max period: {fuel_df['period'].max()}")
         write_to_bq(fuel_df, "hourly_fuel_type")
+    else:
+        raise RuntimeError("Fuel data fetch returned empty dataframe.")
 
     # 4) Natural Gas Prices
     print("4/5  Fetching natural gas prices...")
     ng_price_df = fetch_natural_gas_prices(EIA_API_KEY)
     if not ng_price_df.empty:
+        print(f"  NG price rows: {len(ng_price_df)} | max date: {ng_price_df['date'].max()}")
         write_to_bq(ng_price_df, "daily_ng_price")
+    else:
+        print("  Warning: natural gas price data is empty, skipping write.")
 
     # 5) Weather
     print("5/5  Fetching weather data...")
-    weather_df = fetch_weather_data()
-    if not weather_df.empty:
-        write_to_bq(weather_df, "daily_weather")
+    try:
+        weather_df = fetch_weather_data()
+        if not weather_df.empty:
+            print(f"  Weather rows: {len(weather_df)} | max date: {weather_df['date'].max()}")
+            write_to_bq(weather_df, "daily_weather")
+        else:
+            print("  Warning: weather data is empty, skipping write.")
+    except Exception as e:
+        print(f"  Warning: weather fetch failed, continuing without weather update: {e}")
 
     # 6) Pre-aggregate
     print("6/6  Building aggregated tables...")

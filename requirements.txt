@@ -13,3 +13,5 @@ pandas-gbq
 google-auth
 google-cloud-bigquery
 numpy
+gridstatus>=0.30
+openpyxl>=3.1

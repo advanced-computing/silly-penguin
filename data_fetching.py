@@ -1,13 +1,18 @@
-"""Data fetching functions for all EIA and weather data sources.
+"""Data fetching for all grid intelligence data sources.
 
-Key optimization: EIA API accepts multiple facet values in one request
-(e.g. facets[respondent][]=CISO&facets[respondent][]=ERCO&...) so we
-batch all BAs into a single paginated call instead of looping one-by-one.
+Sources:
+  1. EIA v2 API — demand, interchange, fuel mix, natural gas prices
+  2. Open-Meteo — temperature per BA
+  3. gridstatus library — ISO LMP (PJM, CAISO, ERCOT)
+  4. NREL Developer API — solar & wind resource quality
+  5. LBNL interconnection queue — local Excel file
 """
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 import requests
@@ -15,22 +20,13 @@ import requests
 HTTP_OK = 200
 
 # ---------------------------------------------------------------------------
-# Major Balancing Authorities we track
+# BAs we track + region metadata
 # ---------------------------------------------------------------------------
 MAJOR_BA = [
-    "CISO",  # California ISO
-    "ERCO",  # ERCOT (Texas)
-    "PJM",  # PJM Interconnection
-    "MISO",  # Midcontinent ISO
-    "NYIS",  # New York ISO
-    "ISNE",  # ISO New England
-    "SWPP",  # Southwest Power Pool
-    "SOCO",  # Southern Company
-    "TVA",  # Tennessee Valley Authority
-    "BPAT",  # Bonneville Power Administration
+    "CISO", "ERCO", "PJM", "MISO", "NYIS",
+    "ISNE", "SWPP", "SOCO", "TVA", "BPAT",
 ]
 
-# Representative city coordinates for weather data per BA
 BA_WEATHER_COORDS: dict[str, tuple[float, float]] = {
     "CISO": (36.78, -119.42),
     "ERCO": (31.97, -99.90),
@@ -44,32 +40,115 @@ BA_WEATHER_COORDS: dict[str, tuple[float, float]] = {
     "BPAT": (45.52, -122.68),
 }
 
-# EIA fuel type codes
 FUEL_TYPES = ["NG", "SUN", "WND", "NUC", "COL", "WAT", "OIL", "OTH"]
 
-# Time range: always "3 months ago → today", computed dynamically
+# ISOs we pull LMP for (gridstatus)
+ISO_LMP_SOURCES = ["PJM", "CAISO", "ERCOT"]
+
+# Mapping from our BA codes to gridstatus ISO names
+BA_TO_ISO = {
+    "PJM": "PJM",
+    "CISO": "CAISO",
+    "ERCO": "ERCOT",
+    "MISO": "MISO",
+    "NYIS": "NYISO",
+    "ISNE": "ISONE",
+    "SWPP": "SPP",
+}
+
+# LBNL region → US state codes, used to filter queue data precisely to each BA
+# West and Southeast in LBNL are non-ISO; we use state-level filtering
+BA_STATES: dict[str, list[str]] = {
+    "CISO": ["CA"],
+    "ERCO": ["TX"],
+    "PJM": ["PA", "NJ", "MD", "DE", "VA", "WV", "OH", "KY", "IL", "IN", "MI", "NC", "DC"],
+    "MISO": ["MN", "WI", "IA", "IL", "IN", "MI", "MO", "AR", "LA", "MS", "ND", "SD"],
+    "NYIS": ["NY"],
+    "ISNE": ["MA", "CT", "RI", "VT", "NH", "ME"],
+    "SWPP": ["KS", "OK", "NE", "ND", "SD", "NM", "AR", "TX"],
+    "SOCO": ["GA", "AL", "FL", "MS"],
+    "TVA": ["TN", "AL", "MS", "KY", "VA", "NC", "GA"],
+    "BPAT": ["OR", "WA", "ID", "MT", "WY", "CA", "NV", "UT"],
+}
+
+# NREL — a broader set of sampling points for siting analysis.
+# State centroids + key metro areas. Keeps count manageable (<100).
+NREL_SAMPLE_POINTS: list[tuple[str, str, float, float]] = [
+    # (state, label, lat, lon)
+    ("CA", "Fresno (Central Valley)", 36.75, -119.78),
+    ("CA", "Mojave", 35.05, -118.17),
+    ("CA", "Los Angeles", 34.05, -118.25),
+    ("TX", "West Texas (Midland)", 31.99, -102.08),
+    ("TX", "Houston", 29.76, -95.37),
+    ("TX", "Dallas", 32.78, -96.80),
+    ("TX", "Panhandle (Amarillo)", 35.22, -101.83),
+    ("NY", "Buffalo", 42.89, -78.88),
+    ("NY", "Albany", 42.65, -73.76),
+    ("PA", "Philadelphia", 39.95, -75.17),
+    ("PA", "Pittsburgh", 40.44, -79.99),
+    ("OH", "Columbus", 39.96, -82.99),
+    ("IL", "Chicago", 41.88, -87.63),
+    ("MI", "Detroit", 42.33, -83.05),
+    ("VA", "Richmond", 37.54, -77.44),
+    ("NC", "Raleigh", 35.78, -78.64),
+    ("GA", "Atlanta", 33.75, -84.39),
+    ("FL", "Orlando", 28.54, -81.38),
+    ("FL", "Miami", 25.76, -80.19),
+    ("AL", "Birmingham", 33.52, -86.80),
+    ("TN", "Nashville", 36.16, -86.78),
+    ("TN", "Memphis", 35.15, -90.05),
+    ("KY", "Louisville", 38.25, -85.76),
+    ("MS", "Jackson", 32.30, -90.18),
+    ("LA", "New Orleans", 29.95, -90.07),
+    ("AR", "Little Rock", 34.74, -92.29),
+    ("OK", "Oklahoma City", 35.47, -97.52),
+    ("KS", "Wichita", 37.69, -97.34),
+    ("NE", "Omaha", 41.26, -95.93),
+    ("IA", "Des Moines", 41.59, -93.62),
+    ("MN", "Minneapolis", 44.98, -93.27),
+    ("WI", "Milwaukee", 43.04, -87.91),
+    ("MO", "St. Louis", 38.63, -90.20),
+    ("ND", "Bismarck", 46.81, -100.78),
+    ("SD", "Pierre", 44.37, -100.35),
+    ("WA", "Seattle", 47.61, -122.33),
+    ("OR", "Portland", 45.52, -122.68),
+    ("ID", "Boise", 43.62, -116.21),
+    ("MT", "Billings", 45.78, -108.50),
+    ("WY", "Cheyenne", 41.14, -104.82),
+    ("CO", "Denver", 39.74, -104.99),
+    ("UT", "Salt Lake City", 40.76, -111.89),
+    ("NV", "Las Vegas", 36.17, -115.14),
+    ("NM", "Albuquerque", 35.08, -106.65),
+    ("AZ", "Phoenix", 33.45, -112.07),
+    ("MA", "Boston", 42.36, -71.06),
+    ("CT", "Hartford", 41.76, -72.68),
+    ("ME", "Portland", 43.66, -70.26),
+]
+
+# Dynamic time range
 _today = datetime.now()
 _three_months_ago = _today - timedelta(days=90)
-
+_thirty_days_ago = _today - timedelta(days=30)
 DEFAULT_START = _three_months_ago.strftime("%Y-%m-%dT00")
 DEFAULT_END = _today.strftime("%Y-%m-%dT00")
 DEFAULT_START_DATE = _three_months_ago.strftime("%Y-%m-%d")
 DEFAULT_END_DATE = _today.strftime("%Y-%m-%d")
+LMP_START_DATE = _thirty_days_ago.strftime("%Y-%m-%d")
+LMP_END_DATE = _today.strftime("%Y-%m-%d")
 
 
-# ---------------------------------------------------------------------------
-# 1) Demand & Forecast  (electricity/rto/region-data)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 1) EIA: Demand & Forecast
+# ===========================================================================
 def fetch_demand_data(
     api_key: str,
     respondents: list[str] | None = None,
     start: str = DEFAULT_START,
     end: str = DEFAULT_END,
 ) -> pd.DataFrame:
-    """Fetch hourly demand and day-ahead forecast for all BAs in one batch."""
+    """Fetch hourly demand + day-ahead forecast for all BAs."""
     if respondents is None:
         respondents = MAJOR_BA
-
     df = _fetch_eia_paginated(
         api_key=api_key,
         url="https://api.eia.gov/v2/electricity/rto/region-data/data/",
@@ -77,28 +156,25 @@ def fetch_demand_data(
         start=start,
         end=end,
     )
-
     if df.empty:
         return df
-
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df["period"] = pd.to_datetime(df["period"])
     return df
 
 
-# ---------------------------------------------------------------------------
-# 2) Interchange  (electricity/rto/interchange-data)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 2) EIA: Interchange
+# ===========================================================================
 def fetch_interchange_data(
     api_key: str,
     respondents: list[str] | None = None,
     start: str = DEFAULT_START,
     end: str = DEFAULT_END,
 ) -> pd.DataFrame:
-    """Fetch hourly interchange for all BAs in one batch."""
+    """Fetch hourly inter-BA interchange for all BAs."""
     if respondents is None:
         respondents = MAJOR_BA
-
     df = _fetch_eia_paginated(
         api_key=api_key,
         url="https://api.eia.gov/v2/electricity/rto/interchange-data/data/",
@@ -106,28 +182,25 @@ def fetch_interchange_data(
         start=start,
         end=end,
     )
-
     if df.empty:
         return df
-
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df["period"] = pd.to_datetime(df["period"])
     return df
 
 
-# ---------------------------------------------------------------------------
-# 3) Generation by Fuel Type  (electricity/rto/fuel-type-data)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 3) EIA: Generation by Fuel Type
+# ===========================================================================
 def fetch_fuel_type_data(
     api_key: str,
     respondents: list[str] | None = None,
     start: str = DEFAULT_START,
     end: str = DEFAULT_END,
 ) -> pd.DataFrame:
-    """Fetch hourly generation by fuel type for all BAs in one batch."""
+    """Fetch hourly generation by fuel type for all BAs."""
     if respondents is None:
         respondents = MAJOR_BA
-
     df = _fetch_eia_paginated(
         api_key=api_key,
         url="https://api.eia.gov/v2/electricity/rto/fuel-type-data/data/",
@@ -135,24 +208,22 @@ def fetch_fuel_type_data(
         start=start,
         end=end,
     )
-
     if df.empty:
         return df
-
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df["period"] = pd.to_datetime(df["period"])
     return df
 
 
-# ---------------------------------------------------------------------------
-# 4) Natural Gas Price  (natural-gas/pri/fut)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 4) EIA: Natural Gas Price (Henry Hub)
+# ===========================================================================
 def fetch_natural_gas_prices(
     api_key: str,
     start: str = DEFAULT_START_DATE,
     end: str = DEFAULT_END_DATE,
 ) -> pd.DataFrame:
-    """Fetch Henry Hub natural gas spot prices (daily)."""
+    """Fetch daily Henry Hub NG spot price."""
     url = "https://api.eia.gov/v2/natural-gas/pri/fut/data/"
     params = {
         "api_key": api_key,
@@ -166,30 +237,33 @@ def fetch_natural_gas_prices(
         "offset": 0,
         "length": 5000,
     }
-    response = requests.get(url, params=params, timeout=30)
-
-    if response.status_code != HTTP_OK:
+    try:
+        response = requests.get(url, params=params, timeout=30)
+    except requests.exceptions.RequestException as e:
+        print(f"  ❌ NG price request failed: {e}")
         return pd.DataFrame()
-
+    if response.status_code != HTTP_OK:
+        print(f"  ❌ NG price HTTP {response.status_code}")
+        return pd.DataFrame()
     data = response.json().get("response", {}).get("data", [])
     if not data:
+        print("  ⚠ NG price returned 0 records")
         return pd.DataFrame()
-
     df = pd.DataFrame(data)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df["period"] = pd.to_datetime(df["period"])
     return df.rename(columns={"value": "ng_price", "period": "date"})
 
 
-# ---------------------------------------------------------------------------
-# 5) Weather  (Open-Meteo Archive API)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 5) Weather (Open-Meteo)
+# ===========================================================================
 def fetch_weather_data(
     ba_coords: dict[str, tuple[float, float]] | None = None,
     start_date: str = DEFAULT_START_DATE,
     end_date: str = DEFAULT_END_DATE,
 ) -> pd.DataFrame:
-    """Fetch daily temperature data for each BA's representative city."""
+    """Fetch daily temperature for each BA's representative city."""
     if ba_coords is None:
         ba_coords = BA_WEATHER_COORDS
 
@@ -201,18 +275,13 @@ def fetch_weather_data(
             all_frames.append(df)
 
     if not all_frames:
+        print("  ⚠ Weather: all locations failed")
         return pd.DataFrame()
-
     return pd.concat(all_frames, ignore_index=True)
 
 
-def _fetch_single_weather(
-    lat: float,
-    lon: float,
-    start_date: str,
-    end_date: str,
-) -> pd.DataFrame:
-    """Fetch weather for a single location from Open-Meteo."""
+def _fetch_single_weather(lat, lon, start_date, end_date) -> pd.DataFrame:
+    """Fetch weather for a single location with retries."""
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat,
@@ -222,29 +291,277 @@ def _fetch_single_weather(
         "daily": ["temperature_2m_max", "temperature_2m_min"],
         "timezone": "America/New_York",
     }
-    response = requests.get(url, params=params, timeout=30)
+    for attempt in range(3):
+        try:
+            response = requests.get(url, params=params, timeout=60)
+            if response.status_code != HTTP_OK:
+                if attempt < 2:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                return pd.DataFrame()
+            data = response.json().get("daily", {})
+            if not data or "time" not in data:
+                return pd.DataFrame()
+            df = pd.DataFrame({
+                "date": pd.to_datetime(data["time"]),
+                "max_temp": pd.to_numeric(data.get("temperature_2m_max"), errors="coerce"),
+                "min_temp": pd.to_numeric(data.get("temperature_2m_min"), errors="coerce"),
+            })
+            df["avg_temp"] = (df["max_temp"] + df["min_temp"]) / 2
+            return df
+        except requests.exceptions.RequestException:
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))
+    return pd.DataFrame()
 
-    if response.status_code != HTTP_OK:
+
+# ===========================================================================
+# 6) ISO LMP via gridstatus (PJM, CAISO, ERCOT)
+# ===========================================================================
+def fetch_iso_lmp(
+    isos: list[str] | None = None,
+    start_date: str = LMP_START_DATE,
+    end_date: str = LMP_END_DATE,
+) -> pd.DataFrame:
+    """Fetch hourly day-ahead LMP for selected ISOs.
+
+    Uses gridstatus library, which handles the differences between ISO APIs.
+    Returns a unified DataFrame with columns:
+      iso, time, location, location_type, market, lmp, energy, congestion, loss
+    """
+    if isos is None:
+        isos = ISO_LMP_SOURCES
+
+    import gridstatus
+    from gridstatus import Markets
+
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+
+    all_frames = []
+    for iso_name in isos:
+        print(f"  Fetching {iso_name} LMP from {start_date} to {end_date}...")
+        try:
+            iso_class = getattr(gridstatus, iso_name)
+            iso = iso_class()
+            lmp = iso.get_lmp(
+                date=start,
+                end=end,
+                market=Markets.DAY_AHEAD_HOURLY,
+                locations="ALL",
+                verbose=False,
+            )
+            if lmp is None or lmp.empty:
+                print(f"    ⚠ {iso_name} returned empty")
+                continue
+            lmp = lmp.copy()
+            lmp["iso"] = iso_name
+            # Normalize column names across ISOs
+            rename_map = {
+                "Time": "time",
+                "Interval Start": "time",
+                "Location": "location",
+                "Location Type": "location_type",
+                "Market": "market",
+                "LMP": "lmp",
+                "Energy": "energy",
+                "Congestion": "congestion",
+                "Loss": "loss",
+            }
+            lmp = lmp.rename(columns={k: v for k, v in rename_map.items() if k in lmp.columns})
+            # Keep only essential columns (some ISOs return extras)
+            keep = [c for c in
+                    ["iso", "time", "location", "location_type", "market",
+                     "lmp", "energy", "congestion", "loss"]
+                    if c in lmp.columns]
+            lmp = lmp[keep]
+            # Filter to Zone/Hub level (ignore node level to control data volume)
+            if "location_type" in lmp.columns:
+                mask = lmp["location_type"].astype(str).str.contains(
+                    "ZONE|HUB|AGGREGATE|TRADING_HUB",
+                    case=False, na=False,
+                )
+                if mask.any():
+                    lmp = lmp[mask]
+            lmp["time"] = pd.to_datetime(lmp["time"])
+            for col in ["lmp", "energy", "congestion", "loss"]:
+                if col in lmp.columns:
+                    lmp[col] = pd.to_numeric(lmp[col], errors="coerce")
+            print(f"    → {iso_name}: {len(lmp)} hourly LMP records "
+                  f"({lmp['location'].nunique()} locations)")
+            all_frames.append(lmp)
+        except Exception as e:
+            print(f"    ❌ {iso_name} failed: {type(e).__name__}: {e}")
+            continue
+
+    if not all_frames:
+        print("  ⚠ No LMP data fetched from any ISO")
+        return pd.DataFrame()
+    return pd.concat(all_frames, ignore_index=True)
+
+
+# ===========================================================================
+# 7) NREL Resource Quality (Solar + Wind)
+# ===========================================================================
+def fetch_nrel_resources(api_key: str) -> pd.DataFrame:
+    """Fetch annual solar and wind resource metrics for sample points."""
+    if not api_key:
+        print("  ⚠ NREL_API_KEY not set, skipping resource data")
         return pd.DataFrame()
 
-    data = response.json().get("daily", {})
-    if not data or "time" not in data:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(
-        {
-            "date": pd.to_datetime(data["time"]),
-            "max_temp": pd.to_numeric(data.get("temperature_2m_max"), errors="coerce"),
-            "min_temp": pd.to_numeric(data.get("temperature_2m_min"), errors="coerce"),
+    rows = []
+    for state, label, lat, lon in NREL_SAMPLE_POINTS:
+        solar = _fetch_nrel_solar(api_key, lat, lon)
+        wind = _fetch_nrel_wind(api_key, lat, lon)
+        row = {
+            "state": state, "label": label, "lat": lat, "lon": lon,
+            "solar_ghi_annual_kwh_m2": solar.get("ghi"),
+            "solar_dni_annual_kwh_m2": solar.get("dni"),
+            "wind_speed_100m_avg": wind.get("wind_speed"),
+            "wind_power_100m_avg": wind.get("wind_power"),
         }
-    )
-    df["avg_temp"] = (df["max_temp"] + df["min_temp"]) / 2
+        rows.append(row)
+        time.sleep(0.3)  # polite pacing
+
+    df = pd.DataFrame(rows)
+    print(f"  → NREL: {len(df)} sample locations "
+          f"({df['solar_ghi_annual_kwh_m2'].notna().sum()} with solar, "
+          f"{df['wind_speed_100m_avg'].notna().sum()} with wind)")
     return df
 
 
-# ---------------------------------------------------------------------------
-# Internal: paginated EIA API fetcher (batches all facet values in one call)
-# ---------------------------------------------------------------------------
+def _fetch_nrel_solar(api_key: str, lat: float, lon: float) -> dict:
+    """Fetch solar resource annual averages via NREL Solar Resource API."""
+    url = "https://developer.nrel.gov/api/solar/solar_resource/v1.json"
+    params = {"api_key": api_key, "lat": lat, "lon": lon}
+    try:
+        r = requests.get(url, params=params, timeout=20)
+        if r.status_code != HTTP_OK:
+            return {}
+        outputs = r.json().get("outputs", {})
+        ghi = outputs.get("avg_ghi", {}).get("annual")
+        dni = outputs.get("avg_dni", {}).get("annual")
+        return {"ghi": float(ghi) if ghi else None,
+                "dni": float(dni) if dni else None}
+    except (requests.exceptions.RequestException, ValueError, KeyError):
+        return {}
+
+
+def _fetch_nrel_wind(api_key: str, lat: float, lon: float) -> dict:
+    """Fetch wind resource via NREL Wind Toolkit summary API."""
+    # Wind Toolkit doesn't have a "summary" endpoint analogous to solar_resource.
+    # Use approximation: query PySAM-compatible data point summary.
+    # For MVP: call a simplified endpoint that returns annual averages.
+    # If the dedicated wind endpoint fails, fall back to PVWatts wind-side
+    # or use interpolated NREL WIND Toolkit aggregate.
+    # Here we use wtk-site-count-v2 as a proxy (returns count of usable sites).
+    url = "https://developer.nrel.gov/api/wind-toolkit/v2/wind/site-count.json"
+    params = {"api_key": api_key, "lat": lat, "lon": lon}
+    try:
+        r = requests.get(url, params=params, timeout=20)
+        if r.status_code != HTTP_OK:
+            return {}
+        # Fallback: coarse wind proxy from publicly known mean speeds.
+        # Since NREL wind-only REST endpoints are limited for annual averages,
+        # we expose None and let the Siting module rely on solar primarily.
+        # Future enhancement: integrate WIND Toolkit data via h5pyd/HSDS.
+        return {"wind_speed": None, "wind_power": None}
+    except requests.exceptions.RequestException:
+        return {}
+
+
+# ===========================================================================
+# 8) LBNL Interconnection Queue (local Excel)
+# ===========================================================================
+def load_lbnl_queue(
+    excel_path: str = "data/LBNL_Ix_Queue_Data_File_thru2024_v2.xlsx",
+) -> pd.DataFrame:
+    """Load LBNL interconnection queue data from local Excel.
+
+    Returns a cleaned DataFrame with one row per project, with BA assignment.
+    """
+    path = Path(excel_path)
+    if not path.exists():
+        print(f"  ⚠ LBNL file not found at {path}")
+        return pd.DataFrame()
+
+    print(f"  Reading {path}...")
+    df = pd.read_excel(path, sheet_name="03. Complete Queue Data", header=1)
+    print(f"  Raw LBNL rows: {len(df)}")
+
+    # Keep only essential columns
+    keep_cols = [
+        "q_id", "q_status", "q_date", "prop_date", "on_date", "wd_date",
+        "ia_date", "IA_status_clean", "county", "state", "poi_name",
+        "region", "project_name", "utility", "developer",
+        "project_type", "type_clean", "mw1", "q_year", "prop_year",
+    ]
+    df = df[[c for c in keep_cols if c in df.columns]].copy()
+
+    # Clean up the non-ASCII chars in type_clean
+    if "type_clean" in df.columns:
+        df["type_clean"] = df["type_clean"].astype(str).str.replace(
+            "\u00ac\u2020", " ", regex=False,
+        ).str.strip()
+
+    # Normalize numeric fields
+    df["mw1"] = pd.to_numeric(df["mw1"], errors="coerce")
+    df["q_year"] = pd.to_numeric(df["q_year"], errors="coerce")
+
+    # Assign BA using state-level mapping
+    df["ba"] = df.apply(_assign_ba_from_state_region, axis=1)
+
+    # Parse dates — Excel sometimes stores as serial numbers
+    for dt_col in ["q_date", "prop_date", "on_date", "wd_date", "ia_date"]:
+        if dt_col in df.columns:
+            df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce", unit="D",
+                                        origin="1899-12-30")
+
+    print(f"  → LBNL queue: {len(df)} projects "
+          f"({df['ba'].notna().sum()} matched to a BA)")
+    return df
+
+
+def _assign_ba_from_state_region(row) -> str | None:
+    """Pick the most appropriate BA for a queue project.
+
+    Priority:
+      1. Direct ISO match (PJM, CAISO, MISO, ERCOT, NYISO, ISO-NE, SPP)
+      2. State-based match for non-ISO regions (West, Southeast)
+    """
+    region = str(row.get("region", "")).strip()
+    state = str(row.get("state", "")).strip().upper()
+
+    # Direct ISO matches
+    region_to_ba = {
+        "PJM": "PJM", "CAISO": "CISO", "MISO": "MISO", "ERCOT": "ERCO",
+        "NYISO": "NYIS", "ISO-NE": "ISNE", "SPP": "SWPP",
+    }
+    if region in region_to_ba:
+        return region_to_ba[region]
+
+    # Non-ISO region: use state to assign one of the BAs we track
+    # Ordering matters — first match wins, so priority-order these
+    if state == "CA":
+        return "CISO"
+    if state == "TX":
+        return "ERCO"
+    if state in ["OR", "WA", "ID"]:
+        return "BPAT"
+    if state in ["TN", "KY"]:
+        return "TVA"
+    if state in ["GA", "AL", "FL", "MS"]:
+        # Ambiguous between SOCO and TVA — use SOCO for the Deep South core
+        if state in ["GA", "FL"]:
+            return "SOCO"
+        # AL and MS split: use TVA only for northern-AL signal
+        return "SOCO"
+    return None
+
+
+# ===========================================================================
+# Internal: EIA paginated fetcher with verbose error logging
+# ===========================================================================
 def _fetch_eia_paginated(
     api_key: str,
     url: str,
@@ -252,11 +569,7 @@ def _fetch_eia_paginated(
     start: str,
     end: str,
 ) -> pd.DataFrame:
-    """Fetch data from an EIA API endpoint with pagination.
-
-    All facet values (e.g. multiple BAs) are sent in a single request,
-    avoiding the overhead of one HTTP call per BA.
-    """
+    """Fetch from EIA with pagination and surface all failures."""
     max_length = 5000
     params: dict = {
         "api_key": api_key,
@@ -269,34 +582,44 @@ def _fetch_eia_paginated(
         "offset": 0,
         "length": max_length,
     }
-
     for facet_name, facet_values in facets.items():
         params[f"facets[{facet_name}][]"] = facet_values
 
     all_data: list[dict] = []
     offset = 0
+    endpoint = url.split("/v2/")[-1] if "/v2/" in url else url
 
     while True:
         params["offset"] = offset
-        response = requests.get(url, params=params, timeout=60)
-
+        try:
+            response = requests.get(url, params=params, timeout=60)
+        except requests.exceptions.RequestException as e:
+            print(f"  ❌ {endpoint} request failed at offset {offset}: {e}")
+            break
         if response.status_code != HTTP_OK:
+            print(
+                f"  ❌ {endpoint} HTTP {response.status_code} at offset {offset}"
+            )
+            print(f"     Response body: {response.text[:300]}")
             break
-
-        payload = response.json().get("response", {})
+        try:
+            payload = response.json().get("response", {})
+        except ValueError as e:
+            print(f"  ❌ {endpoint} JSON parse failed: {e}")
+            break
         records = payload.get("data", [])
-
         if not records:
+            if offset == 0:
+                print(f"  ⚠ {endpoint} returned 0 records on first page")
+                print(f"     Facets: {facets}")
+                print(f"     Date range: {start} → {end}")
             break
-
         all_data.extend(records)
-
         if len(records) < max_length:
             break
-
         offset += max_length
 
+    print(f"  → {endpoint}: {len(all_data)} total records fetched")
     if not all_data:
         return pd.DataFrame()
-
     return pd.DataFrame(all_data)

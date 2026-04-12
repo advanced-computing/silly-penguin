@@ -12,6 +12,7 @@ on:
 jobs:
   run-etl:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -38,5 +39,6 @@ jobs:
       - name: Run ETL
         env:
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+          NREL_API_KEY: ${{ secrets.NREL_API_KEY }} 
         run: |
           python load_to_bigquery.py

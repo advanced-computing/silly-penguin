@@ -16,7 +16,7 @@ FORECAST_2 = 4950.0
 DELTA_1 = 200.0
 
 
-def test_calculate_grid_kpis_happy_path():
+def test_calculate_grid_kpis_happy_path() -> None:
     df_pivot = pd.DataFrame(
         {
             "Demand": [ACTUAL_1, ACTUAL_2],
@@ -31,7 +31,7 @@ def test_calculate_grid_kpis_happy_path():
     assert delta == DELTA_1
 
 
-def test_calculate_grid_kpis_missing_column():
+def test_calculate_grid_kpis_missing_column() -> None:
     df_pivot = pd.DataFrame({"Demand": [ACTUAL_1, ACTUAL_2]})
 
     last_actual, last_forecast, delta = calculate_grid_kpis(df_pivot)
@@ -41,7 +41,7 @@ def test_calculate_grid_kpis_missing_column():
     assert delta is None
 
 
-def test_calculate_grid_kpis_empty_df():
+def test_calculate_grid_kpis_empty_df() -> None:
     df_pivot = pd.DataFrame()
 
     last_actual, last_forecast, delta = calculate_grid_kpis(df_pivot)

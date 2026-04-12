@@ -13,18 +13,38 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import requests
 
 HTTP_OK = 200
+MAX_EIA_PAGE_LENGTH = 5000
+WEATHER_MAX_RETRIES = 3
+LAST_WEATHER_RETRY_INDEX = WEATHER_MAX_RETRIES - 1
+WEATHER_RETRY_BASE_SECONDS = 5
+NREL_REQUEST_TIMEOUT = 20
+OPEN_METEO_TIMEOUT = 60
+EIA_REQUEST_TIMEOUT = 60
+NG_PRICE_TIMEOUT = 30
+NREL_PACING_SECONDS = 0.3
+EXCEL_DATE_ORIGIN = "1899-12-30"
+NREL_EMPTY_WIND_RESULT = {"wind_speed": None, "wind_power": None}
 
 # ---------------------------------------------------------------------------
 # BAs we track + region metadata
 # ---------------------------------------------------------------------------
 MAJOR_BA = [
-    "CISO", "ERCO", "PJM", "MISO", "NYIS",
-    "ISNE", "SWPP", "SOCO", "TVA", "BPAT",
+    "CISO",
+    "ERCO",
+    "PJM",
+    "MISO",
+    "NYIS",
+    "ISNE",
+    "SWPP",
+    "SOCO",
+    "TVA",
+    "BPAT",
 ]
 
 BA_WEATHER_COORDS: dict[str, tuple[float, float]] = {
@@ -61,7 +81,21 @@ BA_TO_ISO = {
 BA_STATES: dict[str, list[str]] = {
     "CISO": ["CA"],
     "ERCO": ["TX"],
-    "PJM": ["PA", "NJ", "MD", "DE", "VA", "WV", "OH", "KY", "IL", "IN", "MI", "NC", "DC"],
+    "PJM": [
+        "PA",
+        "NJ",
+        "MD",
+        "DE",
+        "VA",
+        "WV",
+        "OH",
+        "KY",
+        "IL",
+        "IN",
+        "MI",
+        "NC",
+        "DC",
+    ],
     "MISO": ["MN", "WI", "IA", "IL", "IN", "MI", "MO", "AR", "LA", "MS", "ND", "SD"],
     "NYIS": ["NY"],
     "ISNE": ["MA", "CT", "RI", "VT", "NH", "ME"],
@@ -74,7 +108,6 @@ BA_STATES: dict[str, list[str]] = {
 # NREL — a broader set of sampling points for siting analysis.
 # State centroids + key metro areas. Keeps count manageable (<100).
 NREL_SAMPLE_POINTS: list[tuple[str, str, float, float]] = [
-    # (state, label, lat, lon)
     ("CA", "Fresno (Central Valley)", 36.75, -119.78),
     ("CA", "Mojave", 35.05, -118.17),
     ("CA", "Los Angeles", 34.05, -118.25),
@@ -235,20 +268,23 @@ def fetch_natural_gas_prices(
         "sort[0][column]": "period",
         "sort[0][direction]": "desc",
         "offset": 0,
-        "length": 5000,
+        "length": MAX_EIA_PAGE_LENGTH,
     }
     try:
-        response = requests.get(url, params=params, timeout=30)
-    except requests.exceptions.RequestException as e:
-        print(f"  ❌ NG price request failed: {e}")
+        response = requests.get(url, params=params, timeout=NG_PRICE_TIMEOUT)
+    except requests.exceptions.RequestException as exc:
+        print(f"  ❌ NG price request failed: {exc}")
         return pd.DataFrame()
+
     if response.status_code != HTTP_OK:
         print(f"  ❌ NG price HTTP {response.status_code}")
         return pd.DataFrame()
+
     data = response.json().get("response", {}).get("data", [])
     if not data:
         print("  ⚠ NG price returned 0 records")
         return pd.DataFrame()
+
     df = pd.DataFrame(data)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df["period"] = pd.to_datetime(df["period"])
@@ -280,7 +316,12 @@ def fetch_weather_data(
     return pd.concat(all_frames, ignore_index=True)
 
 
-def _fetch_single_weather(lat, lon, start_date, end_date) -> pd.DataFrame:
+def _fetch_single_weather(
+    lat: float,
+    lon: float,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
     """Fetch weather for a single location with retries."""
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
@@ -291,27 +332,39 @@ def _fetch_single_weather(lat, lon, start_date, end_date) -> pd.DataFrame:
         "daily": ["temperature_2m_max", "temperature_2m_min"],
         "timezone": "America/New_York",
     }
-    for attempt in range(3):
+
+    for attempt in range(WEATHER_MAX_RETRIES):
         try:
-            response = requests.get(url, params=params, timeout=60)
+            response = requests.get(url, params=params, timeout=OPEN_METEO_TIMEOUT)
             if response.status_code != HTTP_OK:
-                if attempt < 2:
-                    time.sleep(5 * (attempt + 1))
+                if attempt < LAST_WEATHER_RETRY_INDEX:
+                    time.sleep(WEATHER_RETRY_BASE_SECONDS * (attempt + 1))
                     continue
                 return pd.DataFrame()
+
             data = response.json().get("daily", {})
             if not data or "time" not in data:
                 return pd.DataFrame()
-            df = pd.DataFrame({
-                "date": pd.to_datetime(data["time"]),
-                "max_temp": pd.to_numeric(data.get("temperature_2m_max"), errors="coerce"),
-                "min_temp": pd.to_numeric(data.get("temperature_2m_min"), errors="coerce"),
-            })
+
+            df = pd.DataFrame(
+                {
+                    "date": pd.to_datetime(data["time"]),
+                    "max_temp": pd.to_numeric(
+                        data.get("temperature_2m_max"),
+                        errors="coerce",
+                    ),
+                    "min_temp": pd.to_numeric(
+                        data.get("temperature_2m_min"),
+                        errors="coerce",
+                    ),
+                }
+            )
             df["avg_temp"] = (df["max_temp"] + df["min_temp"]) / 2
             return df
         except requests.exceptions.RequestException:
-            if attempt < 2:
-                time.sleep(5 * (attempt + 1))
+            if attempt < LAST_WEATHER_RETRY_INDEX:
+                time.sleep(WEATHER_RETRY_BASE_SECONDS * (attempt + 1))
+
     return pd.DataFrame()
 
 
@@ -354,9 +407,10 @@ def fetch_iso_lmp(
             if lmp is None or lmp.empty:
                 print(f"    ⚠ {iso_name} returned empty")
                 continue
+
             lmp = lmp.copy()
             lmp["iso"] = iso_name
-            # Normalize column names across ISOs
+
             rename_map = {
                 "Time": "time",
                 "Interval Start": "time",
@@ -368,30 +422,52 @@ def fetch_iso_lmp(
                 "Congestion": "congestion",
                 "Loss": "loss",
             }
-            lmp = lmp.rename(columns={k: v for k, v in rename_map.items() if k in lmp.columns})
-            # Keep only essential columns (some ISOs return extras)
-            keep = [c for c in
-                    ["iso", "time", "location", "location_type", "market",
-                     "lmp", "energy", "congestion", "loss"]
-                    if c in lmp.columns]
+            lmp = lmp.rename(
+                columns={key: value for key, value in rename_map.items() if key in lmp.columns}
+            )
+
+            keep = [
+                column
+                for column in [
+                    "iso",
+                    "time",
+                    "location",
+                    "location_type",
+                    "market",
+                    "lmp",
+                    "energy",
+                    "congestion",
+                    "loss",
+                ]
+                if column in lmp.columns
+            ]
             lmp = lmp[keep]
-            # Filter to Zone/Hub level (ignore node level to control data volume)
+
             if "location_type" in lmp.columns:
-                mask = lmp["location_type"].astype(str).str.contains(
-                    "ZONE|HUB|AGGREGATE|TRADING_HUB",
-                    case=False, na=False,
+                mask = (
+                    lmp["location_type"]
+                    .astype(str)
+                    .str.contains(
+                        "ZONE|HUB|AGGREGATE|TRADING_HUB",
+                        case=False,
+                        na=False,
+                    )
                 )
                 if mask.any():
                     lmp = lmp[mask]
+
             lmp["time"] = pd.to_datetime(lmp["time"])
-            for col in ["lmp", "energy", "congestion", "loss"]:
-                if col in lmp.columns:
-                    lmp[col] = pd.to_numeric(lmp[col], errors="coerce")
-            print(f"    → {iso_name}: {len(lmp)} hourly LMP records "
-                  f"({lmp['location'].nunique()} locations)")
+            for column in ["lmp", "energy", "congestion", "loss"]:
+                if column in lmp.columns:
+                    lmp[column] = pd.to_numeric(lmp[column], errors="coerce")
+
+            print(
+                f"    → {iso_name}: {len(lmp)} hourly LMP records "
+                f"({lmp['location'].nunique()} locations)"
+            )
             all_frames.append(lmp)
-        except Exception as e:
-            print(f"    ❌ {iso_name} failed: {type(e).__name__}: {e}")
+        except Exception as exc:
+            print(f"    ❌ {iso_name} failed: {type(exc).__name__}: {exc}")
             continue
 
     if not all_frames:
@@ -414,60 +490,62 @@ def fetch_nrel_resources(api_key: str) -> pd.DataFrame:
         solar = _fetch_nrel_solar(api_key, lat, lon)
         wind = _fetch_nrel_wind(api_key, lat, lon)
         row = {
-            "state": state, "label": label, "lat": lat, "lon": lon,
+            "state": state,
+            "label": label,
+            "lat": lat,
+            "lon": lon,
             "solar_ghi_annual_kwh_m2": solar.get("ghi"),
             "solar_dni_annual_kwh_m2": solar.get("dni"),
             "wind_speed_100m_avg": wind.get("wind_speed"),
             "wind_power_100m_avg": wind.get("wind_power"),
         }
         rows.append(row)
-        time.sleep(0.3)  # polite pacing
+        time.sleep(NREL_PACING_SECONDS)
 
     df = pd.DataFrame(rows)
-    print(f"  → NREL: {len(df)} sample locations "
-          f"({df['solar_ghi_annual_kwh_m2'].notna().sum()} with solar, "
-          f"{df['wind_speed_100m_avg'].notna().sum()} with wind)")
+    print(
+        f"  → NREL: {len(df)} sample locations "
+        f"({df['solar_ghi_annual_kwh_m2'].notna().sum()} with solar, "
+        f"{df['wind_speed_100m_avg'].notna().sum()} with wind)"
+    )
     return df
 
 
-def _fetch_nrel_solar(api_key: str, lat: float, lon: float) -> dict:
+def _fetch_nrel_solar(api_key: str, lat: float, lon: float) -> dict[str, float | None]:
     """Fetch solar resource annual averages via NREL Solar Resource API."""
     url = "https://developer.nrel.gov/api/solar/solar_resource/v1.json"
     params = {"api_key": api_key, "lat": lat, "lon": lon}
+
     try:
-        r = requests.get(url, params=params, timeout=20)
-        if r.status_code != HTTP_OK:
+        response = requests.get(url, params=params, timeout=NREL_REQUEST_TIMEOUT)
+        if response.status_code != HTTP_OK:
             return {}
-        outputs = r.json().get("outputs", {})
+
+        outputs = response.json().get("outputs", {})
         ghi = outputs.get("avg_ghi", {}).get("annual")
         dni = outputs.get("avg_dni", {}).get("annual")
-        return {"ghi": float(ghi) if ghi else None,
-                "dni": float(dni) if dni else None}
+        return {
+            "ghi": float(ghi) if ghi else None,
+            "dni": float(dni) if dni else None,
+        }
     except (requests.exceptions.RequestException, ValueError, KeyError):
         return {}
 
 
-def _fetch_nrel_wind(api_key: str, lat: float, lon: float) -> dict:
+def _fetch_nrel_wind(api_key: str, lat: float, lon: float) -> dict[str, float | None]:
     """Fetch wind resource via NREL Wind Toolkit summary API."""
-    # Wind Toolkit doesn't have a "summary" endpoint analogous to solar_resource.
-    # Use approximation: query PySAM-compatible data point summary.
-    # For MVP: call a simplified endpoint that returns annual averages.
-    # If the dedicated wind endpoint fails, fall back to PVWatts wind-side
-    # or use interpolated NREL WIND Toolkit aggregate.
-    # Here we use wtk-site-count-v2 as a proxy (returns count of usable sites).
     url = "https://developer.nrel.gov/api/wind-toolkit/v2/wind/site-count.json"
     params = {"api_key": api_key, "lat": lat, "lon": lon}
+    result: dict[str, float | None] = {}
+
     try:
-        r = requests.get(url, params=params, timeout=20)
-        if r.status_code != HTTP_OK:
-            return {}
-        # Fallback: coarse wind proxy from publicly known mean speeds.
-        # Since NREL wind-only REST endpoints are limited for annual averages,
-        # we expose None and let the Siting module rely on solar primarily.
-        # Future enhancement: integrate WIND Toolkit data via h5pyd/HSDS.
-        return {"wind_speed": None, "wind_power": None}
+        response = requests.get(url, params=params, timeout=NREL_REQUEST_TIMEOUT)
+        if response.status_code == HTTP_OK:
+            result = NREL_EMPTY_WIND_RESULT.copy()
     except requests.exceptions.RequestException:
-        return {}
+        result = {}
+
+    return result
 
 
 # ===========================================================================
@@ -489,40 +567,53 @@ def load_lbnl_queue(
     df = pd.read_excel(path, sheet_name="03. Complete Queue Data", header=1)
     print(f"  Raw LBNL rows: {len(df)}")
 
-    # Keep only essential columns
     keep_cols = [
-        "q_id", "q_status", "q_date", "prop_date", "on_date", "wd_date",
-        "ia_date", "IA_status_clean", "county", "state", "poi_name",
-        "region", "project_name", "utility", "developer",
-        "project_type", "type_clean", "mw1", "q_year", "prop_year",
+        "q_id",
+        "q_status",
+        "q_date",
+        "prop_date",
+        "on_date",
+        "wd_date",
+        "ia_date",
+        "IA_status_clean",
+        "county",
+        "state",
+        "poi_name",
+        "region",
+        "project_name",
+        "utility",
+        "developer",
+        "project_type",
+        "type_clean",
+        "mw1",
+        "q_year",
+        "prop_year",
     ]
-    df = df[[c for c in keep_cols if c in df.columns]].copy()
+    df = df[[column for column in keep_cols if column in df.columns]].copy()
 
-    # Clean up the non-ASCII chars in type_clean
     if "type_clean" in df.columns:
-        df["type_clean"] = df["type_clean"].astype(str).str.replace(
-            "\u00ac\u2020", " ", regex=False,
-        ).str.strip()
+        df["type_clean"] = (
+            df["type_clean"].astype(str).str.replace("\u00ac\u2020", " ", regex=False).str.strip()
+        )
 
-    # Normalize numeric fields
     df["mw1"] = pd.to_numeric(df["mw1"], errors="coerce")
     df["q_year"] = pd.to_numeric(df["q_year"], errors="coerce")
-
-    # Assign BA using state-level mapping
     df["ba"] = df.apply(_assign_ba_from_state_region, axis=1)
 
-    # Parse dates — Excel sometimes stores as serial numbers
-    for dt_col in ["q_date", "prop_date", "on_date", "wd_date", "ia_date"]:
-        if dt_col in df.columns:
-            df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce", unit="D",
-                                        origin="1899-12-30")
+    for date_column in ["q_date", "prop_date", "on_date", "wd_date", "ia_date"]:
+        if date_column in df.columns:
+            df[date_column] = pd.to_datetime(
+                df[date_column],
+                errors="coerce",
+                unit="D",
+                origin=EXCEL_DATE_ORIGIN,
+            )
 
-    print(f"  → LBNL queue: {len(df)} projects "
-          f"({df['ba'].notna().sum()} matched to a BA)")
+    print(f"  → LBNL queue: {len(df)} projects ({df['ba'].notna().sum()} matched to a BA)")
     return df
 
 
-def _assign_ba_from_state_region(row) -> str | None:
+def _assign_ba_from_state_region(row: pd.Series) -> str | None:
     """Pick the most appropriate BA for a queue project.
 
     Priority:
@@ -532,16 +623,18 @@ def _assign_ba_from_state_region(row) -> str | None:
     region = str(row.get("region", "")).strip()
     state = str(row.get("state", "")).strip().upper()
 
-    # Direct ISO matches
     region_to_ba = {
-        "PJM": "PJM", "CAISO": "CISO", "MISO": "MISO", "ERCOT": "ERCO",
-        "NYISO": "NYIS", "ISO-NE": "ISNE", "SPP": "SWPP",
+        "PJM": "PJM",
+        "CAISO": "CISO",
+        "MISO": "MISO",
+        "ERCOT": "ERCO",
+        "NYISO": "NYIS",
+        "ISO-NE": "ISNE",
+        "SPP": "SWPP",
     }
     if region in region_to_ba:
         return region_to_ba[region]
 
-    # Non-ISO region: use state to assign one of the BAs we track
-    # Ordering matters — first match wins, so priority-order these
     if state == "CA":
         return "CISO"
     if state == "TX":
@@ -551,10 +644,8 @@ def _assign_ba_from_state_region(row) -> str | None:
     if state in ["TN", "KY"]:
         return "TVA"
     if state in ["GA", "AL", "FL", "MS"]:
-        # Ambiguous between SOCO and TVA — use SOCO for the Deep South core
         if state in ["GA", "FL"]:
             return "SOCO"
-        # AL and MS split: use TVA only for northern-AL signal
         return "SOCO"
     return None
 
@@ -570,8 +661,7 @@ def _fetch_eia_paginated(
     end: str,
 ) -> pd.DataFrame:
     """Fetch from EIA with pagination and surface all failures."""
-    max_length = 5000
-    params: dict = {
+    params: dict[str, Any] = {
         "api_key": api_key,
         "frequency": "hourly",
         "data[0]": "value",
@@ -580,33 +670,34 @@ def _fetch_eia_paginated(
         "sort[0][column]": "period",
         "sort[0][direction]": "desc",
         "offset": 0,
-        "length": max_length,
+        "length": MAX_EIA_PAGE_LENGTH,
     }
     for facet_name, facet_values in facets.items():
         params[f"facets[{facet_name}][]"] = facet_values
 
-    all_data: list[dict] = []
+    all_data: list[dict[str, Any]] = []
     offset = 0
     endpoint = url.split("/v2/")[-1] if "/v2/" in url else url
 
     while True:
         params["offset"] = offset
         try:
-            response = requests.get(url, params=params, timeout=60)
-        except requests.exceptions.RequestException as e:
-            print(f"  ❌ {endpoint} request failed at offset {offset}: {e}")
+            response = requests.get(url, params=params, timeout=EIA_REQUEST_TIMEOUT)
+        except requests.exceptions.RequestException as exc:
+            print(f"  ❌ {endpoint} request failed at offset {offset}: {exc}")
             break
+
         if response.status_code != HTTP_OK:
-            print(
-                f"  ❌ {endpoint} HTTP {response.status_code} at offset {offset}"
-            )
+            print(f"  ❌ {endpoint} HTTP {response.status_code} at offset {offset}")
             print(f"     Response body: {response.text[:300]}")
             break
+
         try:
             payload = response.json().get("response", {})
-        except ValueError as e:
-            print(f"  ❌ {endpoint} JSON parse failed: {e}")
+        except ValueError as exc:
+            print(f"  ❌ {endpoint} JSON parse failed: {exc}")
             break
+
         records = payload.get("data", [])
         if not records:
             if offset == 0:
@@ -614,10 +705,11 @@ def _fetch_eia_paginated(
                 print(f"     Facets: {facets}")
                 print(f"     Date range: {start} → {end}")
             break
+
         all_data.extend(records)
-        if len(records) < max_length:
+        if len(records) < MAX_EIA_PAGE_LENGTH:
             break
-        offset += max_length
+        offset += MAX_EIA_PAGE_LENGTH
 
     print(f"  → {endpoint}: {len(all_data)} total records fetched")
     if not all_data:

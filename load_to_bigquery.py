@@ -298,9 +298,7 @@ def main() -> None:
 
     tables_present = {k for k, v in results.items() if v}
     if not tables_present:
-        raise RuntimeError(
-            "No raw tables were successfully written; nothing to aggregate."
-        )
+        raise RuntimeError("No raw tables were successfully written; nothing to aggregate.")
 
     print("\n--- Running aggregations ---")
     client = bigquery.Client(project=GCP_PROJECT)

@@ -41,6 +41,8 @@ RENEWABLE_FUELS = ["SUN", "WND", "WAT"]
 FOSSIL_FUELS = ["NG", "COL", "OIL"]
 
 MIN_HOURS_FOR_GROWTH = 48
+MIN_ISO_LOCATIONS_FOR_SPREAD = 2
+MIN_HOURS_FOR_SPREAD = 24
 
 LMP_SPIKE_MULTIPLIER = 3.0
 LMP_NEGATIVE_THRESHOLD = -10.0
@@ -96,18 +98,22 @@ def detect_anomalies(demand_df: pd.DataFrame) -> pd.DataFrame:
         else:
             status = "NORMAL"
 
-        alerts.append({
-            "ba": ba,
-            "status": status,
-            "recent_mean_error": recent_mean,
-            "recent_max_error": recent_max,
-            "p95_threshold": p95,
-            "p90_threshold": p90,
-            "hours_above_p95": int(hours_above_p95),
-            "hours_above_p90": int(hours_above_p90),
-            "latest_error": recent["abs_error"].iloc[-1],
-            "latest_demand": recent["Demand"].iloc[-1] if "Demand" in recent.columns else np.nan,
-        })
+        alerts.append(
+            {
+                "ba": ba,
+                "status": status,
+                "recent_mean_error": recent_mean,
+                "recent_max_error": recent_max,
+                "p95_threshold": p95,
+                "p90_threshold": p90,
+                "hours_above_p95": int(hours_above_p95),
+                "hours_above_p90": int(hours_above_p90),
+                "latest_error": recent["abs_error"].iloc[-1],
+                "latest_demand": recent["Demand"].iloc[-1]
+                if "Demand" in recent.columns
+                else np.nan,
+            }
+        )
 
     result = pd.DataFrame(alerts)
     if result.empty:
@@ -161,37 +167,40 @@ def detect_lmp_anomalies(lmp_df: pd.DataFrame) -> pd.DataFrame:
         else:
             status = "NORMAL"
 
-        alerts.append({
-            "iso": iso,
-            "location": location,
-            "status": status,
-            "recent_avg_lmp": recent_avg,
-            "recent_max_lmp": recent_max,
-            "recent_min_lmp": recent_min,
-            "historical_median": historical_median,
-            "spike_ratio": recent_avg / historical_median if historical_median > 0 else None,
-            "latest_lmp": recent["lmp"].iloc[-1],
-            "latest_time": recent["time"].iloc[-1],
-        })
+        alerts.append(
+            {
+                "iso": iso,
+                "location": location,
+                "status": status,
+                "recent_avg_lmp": recent_avg,
+                "recent_max_lmp": recent_max,
+                "recent_min_lmp": recent_min,
+                "historical_median": historical_median,
+                "spike_ratio": recent_avg / historical_median if historical_median > 0 else None,
+                "latest_lmp": recent["lmp"].iloc[-1],
+                "latest_time": recent["time"].iloc[-1],
+            }
+        )
 
     result = pd.DataFrame(alerts)
     if result.empty:
         return result
     status_order = {"SPIKE": 0, "NEGATIVE": 1, "NORMAL": 2}
     result["_sort"] = result["status"].map(status_order)
-    return result.sort_values(["_sort", "spike_ratio"], ascending=[True, False]) \
-        .drop(columns=["_sort"]).reset_index(drop=True)
+    return (
+        result.sort_values(["_sort", "spike_ratio"], ascending=[True, False])
+        .drop(columns=["_sort"])
+        .reset_index(drop=True)
+    )
 
 
-def get_lmp_time_series(
-    lmp_df: pd.DataFrame, iso: str, location: str
-) -> pd.DataFrame:
+def get_lmp_time_series(lmp_df: pd.DataFrame, iso: str, location: str) -> pd.DataFrame:
     """Get full LMP time series for a single location."""
     if lmp_df.empty:
         return pd.DataFrame()
-    return lmp_df[
-        (lmp_df["iso"] == iso) & (lmp_df["location"] == location)
-    ].sort_values("time").copy()
+    return (
+        lmp_df[(lmp_df["iso"] == iso) & (lmp_df["location"] == location)].sort_values("time").copy()
+    )
 
 
 # ===================================================================
@@ -209,13 +218,15 @@ def compute_interchange_patterns(interchange_df: pd.DataFrame) -> pd.DataFrame:
         work.groupby(["fromba", "toba", "hour"])["value"]
         .agg(["mean", "std", "count", "min", "max"])
         .reset_index()
-        .rename(columns={
-            "mean": "avg_flow",
-            "std": "volatility",
-            "count": "n_obs",
-            "min": "min_flow",
-            "max": "max_flow",
-        })
+        .rename(
+            columns={
+                "mean": "avg_flow",
+                "std": "volatility",
+                "count": "n_obs",
+                "min": "min_flow",
+                "max": "max_flow",
+            }
+        )
     )
     patterns["volatility"] = patterns["volatility"].fillna(0)
     return patterns
@@ -227,9 +238,7 @@ def identify_arbitrage_opportunities(interchange_df: pd.DataFrame) -> pd.DataFra
     if patterns.empty:
         return pd.DataFrame()
 
-    peak = patterns[
-        (patterns["hour"] >= NERC_PEAK_START) & (patterns["hour"] <= NERC_PEAK_END)
-    ]
+    peak = patterns[(patterns["hour"] >= NERC_PEAK_START) & (patterns["hour"] <= NERC_PEAK_END)]
     if peak.empty:
         return pd.DataFrame()
 
@@ -258,22 +267,16 @@ def identify_arbitrage_opportunities(interchange_df: pd.DataFrame) -> pd.DataFra
     signals["signal_score"] = (
         signals["directional_strength"] * 0.6 + signals["consistency"] * 0.4
     ) * 100
-    signals["direction"] = np.where(
-        signals["peak_avg_flow"] > 0, "Export →", "← Import"
-    )
+    signals["direction"] = np.where(signals["peak_avg_flow"] > 0, "Export →", "← Import")
     return signals.sort_values("signal_score", ascending=False).reset_index(drop=True)
 
 
-def get_pair_hourly_profile(
-    interchange_df: pd.DataFrame, fromba: str, toba: str
-) -> pd.DataFrame:
+def get_pair_hourly_profile(interchange_df: pd.DataFrame, fromba: str, toba: str) -> pd.DataFrame:
     """24-hour flow profile for a specific BA pair."""
     patterns = compute_interchange_patterns(interchange_df)
     if patterns.empty:
         return pd.DataFrame()
-    pair = patterns[
-        (patterns["fromba"] == fromba) & (patterns["toba"] == toba)
-    ].copy()
+    pair = patterns[(patterns["fromba"] == fromba) & (patterns["toba"] == toba)].copy()
     return pair.sort_values("hour")
 
 
@@ -288,35 +291,35 @@ def compute_lmp_zonal_spreads(lmp_df: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
     for iso, iso_group in df.groupby("iso"):
-        if iso_group["location"].nunique() < 2:
+        if iso_group["location"].nunique() < MIN_ISO_LOCATIONS_FOR_SPREAD:
             continue
 
-        wide = iso_group.pivot_table(
-            index="time", columns="location", values="lmp", aggfunc="mean"
-        )
-        if wide.shape[1] < 2:
+        wide = iso_group.pivot_table(index="time", columns="location", values="lmp", aggfunc="mean")
+        if wide.shape[1] < MIN_ISO_LOCATIONS_FOR_SPREAD:
             continue
 
-        peak_mask = (wide.index.hour >= NERC_PEAK_START) & \
-                    (wide.index.hour <= NERC_PEAK_END)
+        peak_mask = (wide.index.hour >= NERC_PEAK_START) & (wide.index.hour <= NERC_PEAK_END)
 
         loc_list = list(wide.columns)
         for i, loc_a in enumerate(loc_list):
-            for loc_b in loc_list[i + 1:]:
+            for loc_b in loc_list[i + 1 :]:
                 spread = (wide[loc_a] - wide[loc_b]).dropna()
-                if len(spread) < 24:
+                if len(spread) < MIN_HOURS_FOR_SPREAD:
                     continue
-                peak_spread_series = spread[peak_mask[:len(spread)]]
-                rows.append({
-                    "iso": iso,
-                    "zone_a": loc_a,
-                    "zone_b": loc_b,
-                    "mean_spread": spread.abs().mean(),
-                    "peak_spread": peak_spread_series.abs().mean()
-                                   if len(peak_spread_series) > 0 else 0,
-                    "spread_volatility": spread.std(),
-                    "n_hours": len(spread),
-                })
+                peak_spread_series = spread[peak_mask[: len(spread)]]
+                rows.append(
+                    {
+                        "iso": iso,
+                        "zone_a": loc_a,
+                        "zone_b": loc_b,
+                        "mean_spread": spread.abs().mean(),
+                        "peak_spread": peak_spread_series.abs().mean()
+                        if len(peak_spread_series) > 0
+                        else 0,
+                        "spread_volatility": spread.std(),
+                        "n_hours": len(spread),
+                    }
+                )
 
     if not rows:
         return pd.DataFrame()
@@ -336,9 +339,7 @@ def compute_lmp_zonal_spreads(lmp_df: pd.DataFrame) -> pd.DataFrame:
 def _score_demand_growth(demand_df: pd.DataFrame, ba: str) -> float:
     if demand_df.empty:
         return 50.0
-    ba_d = demand_df[
-        (demand_df["respondent"] == ba) & (demand_df["type-name"] == "Demand")
-    ]
+    ba_d = demand_df[(demand_df["respondent"] == ba) & (demand_df["type-name"] == "Demand")]
     if len(ba_d) < MIN_HOURS_FOR_GROWTH:
         return 50.0
 
@@ -399,14 +400,20 @@ def _score_fossil_transition(fuel_df: pd.DataFrame, ba: str) -> float:
 def _score_queue_activity(queue_summary: pd.DataFrame, ba: str) -> dict:
     if queue_summary.empty:
         return {
-            "queue_active_score": 50.0, "queue_completion_score": 50.0,
-            "active_projects": 0, "active_capacity_mw": 0, "completion_rate": None,
+            "queue_active_score": 50.0,
+            "queue_completion_score": 50.0,
+            "active_projects": 0,
+            "active_capacity_mw": 0,
+            "completion_rate": None,
         }
     ba_row = queue_summary[queue_summary["ba"] == ba]
     if ba_row.empty:
         return {
-            "queue_active_score": 25.0, "queue_completion_score": 50.0,
-            "active_projects": 0, "active_capacity_mw": 0, "completion_rate": None,
+            "queue_active_score": 25.0,
+            "queue_completion_score": 50.0,
+            "active_projects": 0,
+            "active_capacity_mw": 0,
+            "completion_rate": None,
         }
 
     row = ba_row.iloc[0]
@@ -453,9 +460,12 @@ def compute_transition_scores(
             active_capacity_mw = q["active_capacity_mw"]
             completion_rate = q["completion_rate"]
             composite = (
-                demand_score * 0.15 + renewable_score * 0.15
-                + import_score * 0.15 + fossil_score * 0.15
-                + queue_active * 0.20 + queue_completion * 0.20
+                demand_score * 0.15
+                + renewable_score * 0.15
+                + import_score * 0.15
+                + fossil_score * 0.15
+                + queue_active * 0.20
+                + queue_completion * 0.20
             )
         else:
             queue_active = np.nan
@@ -464,36 +474,36 @@ def compute_transition_scores(
             active_capacity_mw = 0
             completion_rate = None
             composite = (
-                demand_score * 0.25 + renewable_score * 0.25
-                + import_score * 0.25 + fossil_score * 0.25
+                demand_score * 0.25
+                + renewable_score * 0.25
+                + import_score * 0.25
+                + fossil_score * 0.25
             )
 
-        scores.append({
-            "ba": ba_code,
-            "name": meta["name"],
-            "demand_growth_score": demand_score,
-            "renewable_headroom_score": renewable_score,
-            "current_renewable_pct": current_pct,
-            "import_dependence_score": import_score,
-            "fossil_transition_score": fossil_score,
-            "queue_active_score": queue_active,
-            "queue_completion_score": queue_completion,
-            "active_projects": active_projects,
-            "active_capacity_mw": active_capacity_mw,
-            "completion_rate": completion_rate,
-            "composite_score": composite,
-        })
+        scores.append(
+            {
+                "ba": ba_code,
+                "name": meta["name"],
+                "demand_growth_score": demand_score,
+                "renewable_headroom_score": renewable_score,
+                "current_renewable_pct": current_pct,
+                "import_dependence_score": import_score,
+                "fossil_transition_score": fossil_score,
+                "queue_active_score": queue_active,
+                "queue_completion_score": queue_completion,
+                "active_projects": active_projects,
+                "active_capacity_mw": active_capacity_mw,
+                "completion_rate": completion_rate,
+                "composite_score": composite,
+            }
+        )
 
     return (
-        pd.DataFrame(scores)
-        .sort_values("composite_score", ascending=False)
-        .reset_index(drop=True)
+        pd.DataFrame(scores).sort_values("composite_score", ascending=False).reset_index(drop=True)
     )
 
 
-def get_queue_breakdown_for_ba(
-    queue_type_summary: pd.DataFrame, ba: str
-) -> pd.DataFrame:
+def get_queue_breakdown_for_ba(queue_type_summary: pd.DataFrame, ba: str) -> pd.DataFrame:
     """Resource-type breakdown of queue for a BA."""
     if queue_type_summary.empty:
         return pd.DataFrame()
@@ -507,9 +517,7 @@ def get_queue_breakdown_for_ba(
 def _compliance_demand_section(demand_df: pd.DataFrame, ba: str) -> dict | None:
     if demand_df.empty:
         return None
-    ba_demand = demand_df[
-        (demand_df["respondent"] == ba) & (demand_df["type-name"] == "Demand")
-    ]
+    ba_demand = demand_df[(demand_df["respondent"] == ba) & (demand_df["type-name"] == "Demand")]
     if ba_demand.empty:
         return None
     return {
@@ -535,9 +543,7 @@ def _compliance_forecast_section(demand_df: pd.DataFrame, ba: str) -> dict | Non
     }
 
 
-def _compliance_interchange_section(
-    interchange_df: pd.DataFrame, ba: str
-) -> dict | None:
+def _compliance_interchange_section(interchange_df: pd.DataFrame, ba: str) -> dict | None:
     if interchange_df.empty or "fromba" not in interchange_df.columns:
         return None
     ba_int = interchange_df[interchange_df["fromba"] == ba]
@@ -592,7 +598,7 @@ def _compliance_cross_module_section(
     return out if out else None
 
 
-def generate_compliance_summary(
+def generate_compliance_summary(  # noqa: PLR0913
     demand_df: pd.DataFrame,
     interchange_df: pd.DataFrame,
     fuel_df: pd.DataFrame,
@@ -633,7 +639,7 @@ def generate_compliance_summary(
 # ===================================================================
 # 5) EXECUTIVE BRIEFING (NEW)
 # ===================================================================
-def build_executive_briefing(
+def build_executive_briefing(  # noqa: C901, PLR0913, PLR0912
     ba: str,
     demand_df: pd.DataFrame,
     interchange_df: pd.DataFrame,
@@ -655,9 +661,7 @@ def build_executive_briefing(
         ba_alert = anomaly_alerts[anomaly_alerts["ba"] == ba]
         if not ba_alert.empty:
             anomaly_status = ba_alert.iloc[0]["status"]
-            briefing["latest_error_mwh"] = round(
-                float(ba_alert.iloc[0]["latest_error"]), 0
-            )
+            briefing["latest_error_mwh"] = round(float(ba_alert.iloc[0]["latest_error"]), 0)
     briefing["anomaly_status"] = anomaly_status
 
     pivot = demand_df[
@@ -665,9 +669,9 @@ def build_executive_briefing(
         & (demand_df["type-name"].isin(["Demand", "Day-ahead demand forecast"]))
     ].copy()
     if not pivot.empty:
-        pivot = pivot.pivot_table(
-            index="period", columns="type-name", values="value"
-        ).sort_index(ascending=False)
+        pivot = pivot.pivot_table(index="period", columns="type-name", values="value").sort_index(
+            ascending=False
+        )
         if "Demand" in pivot.columns and len(pivot) > 0:
             briefing["latest_demand_mwh"] = round(float(pivot["Demand"].iloc[0]), 0)
             if "Day-ahead demand forecast" in pivot.columns:
@@ -687,14 +691,10 @@ def build_executive_briefing(
         if not ba_trans.empty:
             row = ba_trans.iloc[0]
             briefing["transition_score"] = round(float(row["composite_score"]), 1)
-            rank_idx = transition_scores.index[
-                transition_scores["ba"] == ba
-            ].tolist()
+            rank_idx = transition_scores.index[transition_scores["ba"] == ba].tolist()
             if rank_idx:
                 briefing["transition_rank"] = int(rank_idx[0]) + 1
-            briefing["active_queue_mw"] = round(float(
-                row.get("active_capacity_mw", 0) or 0
-            ), 0)
+            briefing["active_queue_mw"] = round(float(row.get("active_capacity_mw", 0) or 0), 0)
             briefing["active_projects"] = int(row.get("active_projects", 0) or 0)
 
     if not fuel_df.empty and "fueltype" in fuel_df.columns:
@@ -709,12 +709,8 @@ def build_executive_briefing(
     if iso and lmp_alerts is not None and not lmp_alerts.empty:
         iso_lmps = lmp_alerts[lmp_alerts["iso"] == iso]
         if not iso_lmps.empty:
-            briefing["lmp_spike_locations"] = int(
-                (iso_lmps["status"] == "SPIKE").sum()
-            )
-            briefing["lmp_negative_locations"] = int(
-                (iso_lmps["status"] == "NEGATIVE").sum()
-            )
+            briefing["lmp_spike_locations"] = int((iso_lmps["status"] == "SPIKE").sum())
+            briefing["lmp_negative_locations"] = int((iso_lmps["status"] == "NEGATIVE").sum())
 
     return briefing
 
@@ -811,14 +807,11 @@ def build_geographic_summary(
         }
         if not demand_df.empty:
             ba_demand = demand_df[demand_df["respondent"] == ba_code]
-            pivot = ba_demand.pivot_table(
-                index="period", columns="type-name", values="value"
-            )
+            pivot = ba_demand.pivot_table(index="period", columns="type-name", values="value")
             if {"Demand", "Day-ahead demand forecast"}.issubset(pivot.columns):
                 demand_safe = pivot["Demand"].replace(0, pd.NA)
                 ape = (
-                    (pivot["Demand"] - pivot["Day-ahead demand forecast"]).abs()
-                    / demand_safe
+                    (pivot["Demand"] - pivot["Day-ahead demand forecast"]).abs() / demand_safe
                 ) * 100
                 row["mape"] = ape.mean()
                 row["avg_demand"] = pivot["Demand"].mean()
@@ -832,9 +825,7 @@ def build_geographic_summary(
             ba_fuel = fuel_df[fuel_df["respondent"] == ba_code]
             if not ba_fuel.empty:
                 total_gen = ba_fuel["value"].sum()
-                renewable_gen = ba_fuel[
-                    ba_fuel["fueltype"].isin(RENEWABLE_FUELS)
-                ]["value"].sum()
+                renewable_gen = ba_fuel[ba_fuel["fueltype"].isin(RENEWABLE_FUELS)]["value"].sum()
                 if total_gen > 0:
                     row["renewable_share"] = (renewable_gen / total_gen) * 100
         rows.append(row)

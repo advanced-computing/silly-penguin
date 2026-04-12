@@ -653,7 +653,7 @@ def _assign_ba_from_state_region(row: pd.Series) -> str | None:
 # ===========================================================================
 # Internal: EIA paginated fetcher with verbose error logging
 # ===========================================================================
-def _fetch_eia_paginated(
+def _fetch_eia_paginated(  # noqa: PLR0911
     api_key: str,
     url: str,
     facets: dict[str, list[str]],

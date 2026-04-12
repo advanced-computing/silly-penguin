@@ -11,6 +11,7 @@ Authenticate first: gcloud auth application-default login
 from __future__ import annotations
 
 import os
+from pprint import pprint
 
 from dotenv import load_dotenv
 from google.cloud import bigquery
@@ -177,12 +178,9 @@ def main() -> None:
     try:
         weather_df = fetch_weather_data()
         if not weather_df.empty:
-            print(f"  Weather rows: {len(weather_df)} | max date: {weather_df['date'].max()}")
             write_to_bq(weather_df, "daily_weather")
-        else:
-            print("  Warning: weather data is empty, skipping write.")
     except Exception as e:
-        print(f"  Warning: weather fetch failed, continuing without weather update: {e}")
+        print(f"  ⚠ Weather failed, continuing: {e}")
 
     # 6) Pre-aggregate
     print("6/6  Building aggregated tables...")

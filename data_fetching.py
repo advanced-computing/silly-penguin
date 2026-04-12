@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 
+import time
+
 HTTP_OK = 200
 
 # ---------------------------------------------------------------------------
@@ -206,13 +208,7 @@ def fetch_weather_data(
     return pd.concat(all_frames, ignore_index=True)
 
 
-def _fetch_single_weather(
-    lat: float,
-    lon: float,
-    start_date: str,
-    end_date: str,
-) -> pd.DataFrame:
-    """Fetch weather for a single location from Open-Meteo."""
+def _fetch_single_weather(lat, lon, start_date, end_date):
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat,
@@ -222,24 +218,31 @@ def _fetch_single_weather(
         "daily": ["temperature_2m_max", "temperature_2m_min"],
         "timezone": "America/New_York",
     }
-    response = requests.get(url, params=params, timeout=30)
-
-    if response.status_code != HTTP_OK:
-        return pd.DataFrame()
-
-    data = response.json().get("daily", {})
-    if not data or "time" not in data:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(
-        {
-            "date": pd.to_datetime(data["time"]),
-            "max_temp": pd.to_numeric(data.get("temperature_2m_max"), errors="coerce"),
-            "min_temp": pd.to_numeric(data.get("temperature_2m_min"), errors="coerce"),
-        }
-    )
-    df["avg_temp"] = (df["max_temp"] + df["min_temp"]) / 2
-    return df
+    for attempt in range(3):
+        try:
+            response = requests.get(url, params=params, timeout=60)
+            if response.status_code != HTTP_OK:
+                if attempt < 2:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                return pd.DataFrame()
+            data = response.json().get("daily", {})
+            if not data or "time" not in data:
+                return pd.DataFrame()
+            df = pd.DataFrame(
+                {
+                    "date": pd.to_datetime(data["time"]),
+                    "max_temp": pd.to_numeric(data.get("temperature_2m_max"), errors="coerce"),
+                    "min_temp": pd.to_numeric(data.get("temperature_2m_min"), errors="coerce"),
+                }
+            )
+            df["avg_temp"] = (df["max_temp"] + df["min_temp"]) / 2
+            return df
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
+            print(f"     Weather attempt {attempt + 1} failed: {type(e).__name__}")
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))
+    return pd.DataFrame()
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +257,10 @@ def _fetch_eia_paginated(
 ) -> pd.DataFrame:
     """Fetch data from an EIA API endpoint with pagination.
 
-    All facet values (e.g. multiple BAs) are sent in a single request,
-    avoiding the overhead of one HTTP call per BA.
+    All facet values are sent in a single request, avoiding the
+    overhead of one HTTP call per BA. Errors are logged verbosely
+    so silent failures (HTTP 403/429, empty responses, schema changes)
+    surface in CI logs.
     """
     max_length = 5000
     params: dict = {
@@ -275,18 +280,35 @@ def _fetch_eia_paginated(
 
     all_data: list[dict] = []
     offset = 0
+    endpoint = url.split("/v2/")[-1] if "/v2/" in url else url
 
     while True:
         params["offset"] = offset
-        response = requests.get(url, params=params, timeout=60)
 
-        if response.status_code != HTTP_OK:
+        try:
+            response = requests.get(url, params=params, timeout=60)
+        except requests.exceptions.RequestException as e:
+            print(f"  ❌ {endpoint} request failed at offset {offset}: {e}")
             break
 
-        payload = response.json().get("response", {})
+        if response.status_code != HTTP_OK:
+            print(f"  ❌ {endpoint} HTTP {response.status_code} at offset {offset}")
+            print(f"     Response body: {response.text[:300]}")
+            break
+
+        try:
+            payload = response.json().get("response", {})
+        except ValueError as e:
+            print(f"  ❌ {endpoint} JSON parse failed: {e}")
+            break
+
         records = payload.get("data", [])
 
         if not records:
+            if offset == 0:
+                print(f"  ⚠ {endpoint} returned 0 records on first page")
+                print(f"     Facets: {facets}")
+                print(f"     Date range: {start} → {end}")
             break
 
         all_data.extend(records)
@@ -295,6 +317,8 @@ def _fetch_eia_paginated(
             break
 
         offset += max_length
+
+    print(f"  → {endpoint}: {len(all_data)} total records fetched")
 
     if not all_data:
         return pd.DataFrame()

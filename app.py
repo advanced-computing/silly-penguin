@@ -150,7 +150,7 @@ _creds = _get_creds()
 _DS = f"{GCP_PROJECT}.{BQ_DATASET}"
 
 
-@st.cache_resource(show_spinner="⚡ Loading market data...")
+@st.cache_resource(ttl=3600, show_spinner="⚡ Loading market data...")
 def _load_all():
     from google.cloud import bigquery
 

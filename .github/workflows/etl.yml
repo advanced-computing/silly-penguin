@@ -27,11 +27,15 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - name: Install system libs for lxml
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt1-dev
+      
       - name: Install dependencies
         run: |
           python --version
-          which python
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip wheel setuptools
           pip install -r requirements.txt
 
       - name: Authenticate to Google Cloud

@@ -15,4 +15,3 @@ google-cloud-bigquery
 numpy
 gridstatus>=0.30
 openpyxl>=3.1
-lxml>=5.2,<5.4

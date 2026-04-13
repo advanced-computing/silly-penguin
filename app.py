@@ -303,9 +303,7 @@ def _load_all() -> dict:
     df["period"] = pd.to_datetime(df["period"])
     d["fuel"] = df
 
-    df = q(
-        f"SELECT date, CAST(ng_price AS FLOAT64) AS ng_price FROM `{_DS}.daily_ng_price`"
-    )
+    df = q(f"SELECT date, CAST(ng_price AS FLOAT64) AS ng_price FROM `{_DS}.daily_ng_price`")
     df["date"] = pd.to_datetime(df["date"])
     d["ng_price"] = df
 
@@ -374,12 +372,8 @@ def _compute_signals() -> dict:
         _D["interchange"],
         queue_summary=_D["queue_ba"] if not _D["queue_ba"].empty else None,
     )
-    lmp_alerts = (
-        detect_lmp_anomalies(_D["lmp"]) if not _D["lmp"].empty else pd.DataFrame()
-    )
-    lmp_spreads = (
-        compute_lmp_zonal_spreads(_D["lmp"]) if not _D["lmp"].empty else pd.DataFrame()
-    )
+    lmp_alerts = detect_lmp_anomalies(_D["lmp"]) if not _D["lmp"].empty else pd.DataFrame()
+    lmp_spreads = compute_lmp_zonal_spreads(_D["lmp"]) if not _D["lmp"].empty else pd.DataFrame()
     return {
         "alerts": alerts,
         "arbitrage": arb,
@@ -467,13 +461,9 @@ if page == PAGE_BRIEFING:
         iso_label = briefing.get("iso", "")
         bits = []
         if spikes:
-            bits.append(
-                f"<span style='color:{C_RED};font-weight:600;'>{spikes} spike</span>"
-            )
+            bits.append(f"<span style='color:{C_RED};font-weight:600;'>{spikes} spike</span>")
         if negs:
-            bits.append(
-                f"<span style='color:{C_AMBER};font-weight:600;'>{negs} negative</span>"
-            )
+            bits.append(f"<span style='color:{C_AMBER};font-weight:600;'>{negs} negative</span>")
         if not bits:
             bits.append(f"<span style='color:{C_GREEN};'>no LMP anomalies</span>")
         st.markdown(
@@ -544,9 +534,7 @@ if page == PAGE_BRIEFING:
                 "of <code>abs_error</code> computed over the full 3-month "
                 "history for this BA."
             )
-        st.caption(
-            "→ Full control chart and cross-BA comparison in **Anomaly Detection**"
-        )
+        st.caption("→ Full control chart and cross-BA comparison in **Anomaly Detection**")
 
     with col_b:
         st.subheader(
@@ -560,9 +548,7 @@ if page == PAGE_BRIEFING:
             ),
         )
         arb = _S["arbitrage"]
-        ba_arb = (
-            arb[arb["fromba"] == sel_ba].head(5) if not arb.empty else pd.DataFrame()
-        )
+        ba_arb = arb[arb["fromba"] == sel_ba].head(5) if not arb.empty else pd.DataFrame()
         if ba_arb.empty:
             st.info("No outgoing arbitrage signals for this BA.")
         else:
@@ -633,9 +619,7 @@ if page == PAGE_BRIEFING:
                 float(row["renewable_headroom_score"]),
                 float(row["import_dependence_score"]),
                 float(row["fossil_transition_score"]),
-                float(row["queue_active_score"])
-                if pd.notna(row["queue_active_score"])
-                else 0.0,
+                float(row["queue_active_score"]) if pd.notna(row["queue_active_score"]) else 0.0,
                 (
                     float(row["queue_completion_score"])
                     if pd.notna(row["queue_completion_score"])
@@ -682,9 +666,7 @@ if page == PAGE_BRIEFING:
         if briefing.get("active_projects"):
             qm1, qm2 = st.columns(2)
             qm1.metric("Active Projects", f"{briefing['active_projects']:,}")
-            qm2.metric(
-                "Active Capacity", f"{briefing.get('active_queue_mw', 0):,.0f} MW"
-            )
+            qm2.metric("Active Capacity", f"{briefing.get('active_queue_mw', 0):,.0f} MW")
         if not _D["queue_type"].empty:
             qb = get_queue_breakdown_for_ba(_D["queue_type"], sel_ba)
             if not qb.empty:
@@ -937,9 +919,7 @@ elif page == PAGE_ANOMALY:
             # Drop non-positive values so log scale doesn't explode
             err_df = err_df[err_df["abs_error"] > 0]
             # Order BAs by median error so the plot reads top-to-bottom best→worst
-            median_order = (
-                err_df.groupby("BA")["abs_error"].median().sort_values().index.tolist()
-            )
+            median_order = err_df.groupby("BA")["abs_error"].median().sort_values().index.tolist()
             fig_v = px.violin(
                 err_df,
                 y="BA",
@@ -1032,8 +1012,7 @@ elif page == PAGE_ANOMALY:
                 st.markdown(f"#### 🟢 Normal ({len(norm)})")
                 for _, r in norm.head(8).iterrows():
                     st.success(
-                        f"**{r['iso']} — {r['location']}**  \n"
-                        f"Latest: ${r['latest_lmp']:,.1f}/MWh",
+                        f"**{r['iso']} — {r['location']}**  \nLatest: ${r['latest_lmp']:,.1f}/MWh",
                         icon="🟢",
                     )
                 if norm.empty:
@@ -1080,12 +1059,9 @@ elif page == PAGE_ANOMALY:
             ts = get_lmp_time_series(_D["lmp"], iso_pick, loc_pick)
             if not ts.empty:
                 row = lmp_alerts[
-                    (lmp_alerts["iso"] == iso_pick)
-                    & (lmp_alerts["location"] == loc_pick)
+                    (lmp_alerts["iso"] == iso_pick) & (lmp_alerts["location"] == loc_pick)
                 ]
-                median = (
-                    float(row["historical_median"].iloc[0]) if not row.empty else None
-                )
+                median = float(row["historical_median"].iloc[0]) if not row.empty else None
                 fig_lmp = go.Figure()
                 fig_lmp.add_trace(
                     go.Scatter(
@@ -1328,8 +1304,7 @@ elif page == PAGE_ARBITRAGE:
             rows_h = []
             for _, sr in top_p.iterrows():
                 p = patterns[
-                    (patterns["fromba"] == sr["fromba"])
-                    & (patterns["toba"] == sr["toba"])
+                    (patterns["fromba"] == sr["fromba"]) & (patterns["toba"] == sr["toba"])
                 ]
                 for _, pp in p.iterrows():
                     rows_h.append(
@@ -1401,9 +1376,7 @@ elif page == PAGE_ARBITRAGE:
                 "(alternating colors across the day)."
             ),
         )
-        pair_opts = [
-            f"{r['fromba']} → {r['toba']}" for _, r in signals.head(10).iterrows()
-        ]
+        pair_opts = [f"{r['fromba']} → {r['toba']}" for _, r in signals.head(10).iterrows()]
         sel_pair = st.selectbox("Select route", pair_opts)
         if sel_pair:
             parts = sel_pair.split(" → ")
@@ -1423,9 +1396,7 @@ elif page == PAGE_ARBITRAGE:
                     go.Bar(
                         x=prof["hour"],
                         y=prof["avg_flow"],
-                        marker_color=[
-                            C_PRIMARY if v > 0 else C_RED for v in prof["avg_flow"]
-                        ],
+                        marker_color=[C_PRIMARY if v > 0 else C_RED for v in prof["avg_flow"]],
                         marker_line_width=0,
                         hovertemplate="%{x}:00 — %{y:,.0f} MWh<extra></extra>",
                     )
@@ -1924,9 +1895,7 @@ elif page == PAGE_TRANSITION:
             )
             _style(fig_qb, h=360)
             st.plotly_chart(fig_qb, use_container_width=True)
-            _source(
-                "LBNL <code>queue_ba_summary</code> table across the 10 tracked BAs."
-            )
+            _source("LBNL <code>queue_ba_summary</code> table across the 10 tracked BAs.")
             _methodology(
                 "Single aggregation per BA: <code>active_capacity_mw = "
                 "sum(mw1)</code> restricted to "
@@ -2071,9 +2040,7 @@ elif page == PAGE_COMPLIANCE:
     hc1, hc2 = st.columns([3, 1])
     hc1.markdown(f"## {report['ba']} — {report['ba_name']}")
     if "demand" in sec:
-        hc2.caption(
-            f"{sec['demand']['period_start'][:10]} to {sec['demand']['period_end'][:10]}"
-        )
+        hc2.caption(f"{sec['demand']['period_start'][:10]} to {sec['demand']['period_end'][:10]}")
     _section_divider()
 
     # 2x2 grid: §1 Demand | §2 Forecast / §3 Interchange | §4 Gen Mix
@@ -2218,9 +2185,7 @@ elif page == PAGE_COMPLIANCE:
                         x=mix_df["Share"],
                         y=mix_df["Fuel"],
                         orientation="h",
-                        marker_color=[
-                            FUEL_COLORS.get(f, "#94a3b8") for f in mix_df["Fuel"]
-                        ],
+                        marker_color=[FUEL_COLORS.get(f, "#94a3b8") for f in mix_df["Fuel"]],
                         text=[f"{v:.1f}%" for v in mix_df["Share"]],
                         textposition="outside",
                         textfont=dict(size=11),
@@ -2273,20 +2238,14 @@ elif page == PAGE_COMPLIANCE:
         with cm1:
             st.markdown("**Anomaly Status**")
             if "anomaly_status" in cross:
-                st.markdown(
-                    _status_pill(cross["anomaly_status"]), unsafe_allow_html=True
-                )
+                st.markdown(_status_pill(cross["anomaly_status"]), unsafe_allow_html=True)
                 if "hours_above_p95" in cross:
-                    st.caption(
-                        f"Hours above P95 in last 6h: {cross['hours_above_p95']}"
-                    )
+                    st.caption(f"Hours above P95 in last 6h: {cross['hours_above_p95']}")
             else:
                 st.caption("No anomaly data.")
         with cm2:
             if "transition_composite_score" in cross:
-                cm2.metric(
-                    "Transition Score", f"{cross['transition_composite_score']:.1f}"
-                )
+                cm2.metric("Transition Score", f"{cross['transition_composite_score']:.1f}")
         with cm3:
             if "active_queue_mw" in cross:
                 cm3.metric("Active Queue", f"{cross['active_queue_mw']:,.0f} MW")
@@ -2309,9 +2268,7 @@ elif page == PAGE_COMPLIANCE:
         )
 
     _section_divider()
-    st.caption(
-        "Auto-generated from EIA Form 930 data. Verify against primary sources for filings."
-    )
+    st.caption("Auto-generated from EIA Form 930 data. Verify against primary sources for filings.")
     st.caption(f"Loaded in {time.time() - t0:.2f}s")
 
 

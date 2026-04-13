@@ -8,6 +8,7 @@ source = ["examples/", "examples/flask/", "tests/"]
 [tool.ruff]
 line-length = 100
 [tool.ruff.lint]
+ignore = ["PLR0911", "PLR0912", "PLR0913", "C901", "PLR2004"]
 # https://docs.astral.sh/ruff/rules/
 extend-select = [
   "B",   # flake8-bugbear (common bugs)

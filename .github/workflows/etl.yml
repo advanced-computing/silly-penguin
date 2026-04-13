@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - feature/scheduled-etl
+      - xiawuhao
   schedule:
     - cron: "0 9 * * *"
 
@@ -25,14 +26,42 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
+
+      - name: Show environment
+        run: |
+          python --version
+          python -m pip --version
+          uname -a
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxml2-dev \
+            libxslt1-dev \
+            zlib1g-dev \
+            pkg-config \
+            python3-dev \
+            build-essential
+
+      - name: Verify xml packages
+        run: |
+          dpkg -l | grep libxml2
+          dpkg -l | grep libxslt
+          which xslt-config || true
+          xml2-config --version || true
+
+      - name: Upgrade packaging tools
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install lxml first
+        run: |
+          python -m pip install -v lxml==5.3.2
 
       - name: Install dependencies
         run: |
-          python --version
-          which python
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -42,6 +71,6 @@ jobs:
       - name: Run ETL
         env:
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
-          NREL_API_KEY: ${{ secrets.NREL_API_KEY }} 
+          NREL_API_KEY: ${{ secrets.NREL_API_KEY }}
         run: |
           python load_to_bigquery.py

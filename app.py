@@ -176,6 +176,37 @@ def _cross_ref(text: str) -> None:
     )
 
 
+def _source(text: str) -> None:
+    """Render a source attribution line below a chart.
+
+    Appears as italic grey text. Use for data provenance only; keep
+    methodology/formulas in `_methodology()` instead.
+    """
+    st.markdown(
+        f"<div style='color:{C_MUTED};font-size:0.78rem;"
+        f"font-style:italic;margin:-0.3rem 0 0.2rem 0;'>Source: {text}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _methodology(text: str) -> None:
+    """Render a methodology / formula block below a chart.
+
+    Renders as a bordered light-grey panel with monospace-friendly layout
+    for formulas. Accepts inline HTML (useful for <code> tags and <br/>).
+    """
+    st.markdown(
+        f"<details style='margin:0.3rem 0 0.8rem 0;'>"
+        f"<summary style='color:{C_PRIMARY};font-size:0.82rem;"
+        f"font-weight:600;cursor:pointer;'>▸ Methodology & formula</summary>"
+        f"<div style='background:#f8fafc;border-left:3px solid {C_PRIMARY};"
+        f"padding:0.7rem 1rem;margin-top:0.4rem;font-size:0.85rem;"
+        f"color:#334155;line-height:1.6;'>{text}</div>"
+        f"</details>",
+        unsafe_allow_html=True,
+    )
+
+
 def _section_divider() -> None:
     st.markdown(
         f"<hr style='border:none;border-top:1px solid {C_GRID};margin:1.2rem 0;'/>",
@@ -450,7 +481,14 @@ if page == PAGE_BRIEFING:
     with col_a:
         st.subheader(
             "Forecast Error — Recent",
-            help="Day-ahead forecast vs actual demand. Spikes flagged in Anomaly Detection.",
+            help=(
+                "Absolute day-ahead forecast error for the selected BA over the "
+                "sidebar-configurable time window. The red dashed line shows the "
+                "BA's P95 control limit — bars touching or crossing it are the "
+                "worst 5% of errors in the BA's own distribution. Sustained "
+                "breaches (≥3 hours out of the last 6) trigger the RED status "
+                "in the Anomaly Detection module."
+            ),
         )
         ba_err = get_ba_error_distribution(_D["demand"], sel_ba)
         if ba_err.empty:
@@ -477,18 +515,37 @@ if page == PAGE_BRIEFING:
                     line_dash="dash",
                     line_color=C_RED,
                     line_width=1.2,
-                    annotation_text=f"P95 = {p95:,.0f}",
+                    annotation_text=f"<b>P95 = {p95:,.0f}</b>",
                     annotation_font=dict(color=C_RED, size=10),
+                    annotation_bgcolor="white",
+                    annotation_bordercolor=C_RED,
+                    annotation_borderwidth=1,
+                    annotation_borderpad=3,
+                    annotation_position="top right",
                 )
             fig.update_layout(xaxis_title="", yaxis_title="MWh")
             _style(fig, h=300)
             st.plotly_chart(fig, use_container_width=True)
+            _source(f"EIA Form 930 hourly demand and day-ahead forecast for {sel_ba}.")
+            _methodology(
+                "Plotted series: <code>abs_error<sub>t</sub> = |demand<sub>t</sub> − "
+                "forecast<sub>t</sub>|</code> for the last "
+                f"{days} days. The P95 reference line is the 95th percentile "
+                "of <code>abs_error</code> computed over the full 3-month "
+                "history for this BA."
+            )
         st.caption("→ Full control chart and cross-BA comparison in **Anomaly Detection**")
 
     with col_b:
         st.subheader(
             "Top Arbitrage Routes",
-            help="Persistent peak-hour interchange flows where this BA is the source.",
+            help=(
+                "Ranks outbound interchange routes from this BA by a composite "
+                "arbitrage signal score during NERC peak hours (14:00–20:00). "
+                "High-scoring routes combine large directional flow magnitude "
+                "with low hour-to-hour volatility, indicating a structural "
+                "price-arbitrage opportunity rather than sporadic balancing flow."
+            ),
         )
         arb = _S["arbitrage"]
         ba_arb = arb[arb["fromba"] == sel_ba].head(5) if not arb.empty else pd.DataFrame()
@@ -514,6 +571,16 @@ if page == PAGE_BRIEFING:
             )
             _style(fig, h=300)
             st.plotly_chart(fig, use_container_width=True)
+            _source(
+                "EIA Form 930 hourly interchange data for all BA pairs where "
+                f"<code>fromba = {sel_ba}</code>."
+            )
+            _methodology(
+                "See full derivation in the Arbitrage Signals module. "
+                "Score combines <b>directional strength</b> (60%, normalized "
+                "peak-hour absolute flow) and <b>consistency</b> (40%, "
+                "<code>1 − volatility/max_volatility</code>), scaled to 0–100."
+            )
         st.caption("→ Heatmap and route profiles in **Arbitrage Signals**")
 
     _section_divider()
@@ -524,7 +591,15 @@ if page == PAGE_BRIEFING:
     with col_c:
         st.subheader(
             "Transition Score Profile",
-            help="Six-factor renewable opportunity score for this BA.",
+            help=(
+                "Radar plot of the six factors that compose this BA's renewable "
+                "investment opportunity score. Each axis runs 0–100, where higher "
+                "values mean stronger opportunity on that dimension. The shaded "
+                "polygon area is a rough visual proxy for total opportunity; "
+                "asymmetric shapes indicate a BA that scores well on some "
+                "factors but poorly on others (e.g., strong demand growth but "
+                "weak queue pipeline)."
+            ),
         )
         ba_t = _S["transition"][_S["transition"]["ba"] == sel_ba]
         if ba_t.empty:
@@ -569,12 +644,24 @@ if page == PAGE_BRIEFING:
             )
             _style(fig, h=320)
             st.plotly_chart(fig, use_container_width=True)
+            _source(
+                "EIA Form 930 (demand, fuel mix, interchange) + LBNL "
+                "interconnection queue (Berkeley Lab, thru 2024). Full derivation "
+                "of each axis is documented in the Transition Scoring module."
+            )
         st.caption("→ Composite ranking and queue detail in **Transition Scoring**")
 
     with col_d:
         st.subheader(
             "Interconnection Queue",
-            help="Active project pipeline from LBNL queue data.",
+            help=(
+                "Summary of the generation and storage projects in the "
+                "interconnection queue for this BA, based on LBNL's annual "
+                "dataset. 'Active' means projects currently under study or "
+                "awaiting IA execution. The breakdown by resource type shows "
+                "where developer demand is concentrated — heavy solar/storage "
+                "bias is typical of high-transition-score BAs."
+            ),
         )
         if briefing.get("active_projects"):
             qm1, qm2 = st.columns(2)
@@ -601,6 +688,12 @@ if page == PAGE_BRIEFING:
                 )
                 _style(fig, h=240)
                 st.plotly_chart(fig, use_container_width=True)
+                _source(
+                    "LBNL Queued Up report "
+                    "(<code>interconnection_queue</code> table, thru 2024), "
+                    f"filtered to projects mapped to BA {sel_ba} by "
+                    "ISO/region affiliation or state."
+                )
             else:
                 st.caption("No queue breakdown available for this BA.")
         st.caption("→ Resource-type breakdown details in **Transition Scoring**")
@@ -610,7 +703,14 @@ if page == PAGE_BRIEFING:
     # Compliance teaser
     st.subheader(
         "Compliance Snapshot",
-        help="Key regulatory metrics — full report in Compliance module.",
+        help=(
+            "Four high-level regulatory KPIs extracted from this BA's compliance "
+            "report: average and peak demand (operational scale), MAPE (forecast "
+            "accuracy — see below), and number of trading partners (interchange "
+            "connectivity). The full FERC Form 714 / EIA Form 930-style report "
+            "with all five sections (including cross-module signals) is available "
+            "in the Compliance Reports module."
+        ),
     )
     report = generate_compliance_summary(
         _D["demand"],
@@ -629,6 +729,19 @@ if page == PAGE_BRIEFING:
         cc3.metric("MAPE", f"{sec['forecast_accuracy']['mape']:.2f}%")
     if "interchange" in sec:
         cc4.metric("Trading Partners", f"{sec['interchange']['n_trading_partners']}")
+    _source(
+        "EIA Form 930 (hourly demand, forecast, and interchange) aggregated over "
+        "the full 3-month window for this BA."
+    )
+    _methodology(
+        "<b>MAPE</b> (Mean Absolute Percentage Error): "
+        "<code>MAPE = mean( |demand<sub>t</sub> − forecast<sub>t</sub>| / "
+        "demand<sub>t</sub> )</code> × 100. "
+        "Hours with <code>demand<sub>t</sub> = 0</code> are excluded to avoid "
+        "division by zero. Lower is better. A well-run BA on a stable grid "
+        "typically sits in the 1–3% range; values above 5% signal either "
+        "forecasting-model issues or unusual weather/load patterns."
+    )
     st.caption("→ Full FERC-style sections in **Compliance Reports**")
 
     st.caption(f"Briefing assembled in {time.time() - t0:.2f}s")
@@ -702,8 +815,14 @@ elif page == PAGE_ANOMALY:
         st.subheader(
             f"{sel_ba} — Error Control Chart",
             help=(
-                "Plots absolute forecast error with P90 and P95 control limits. "
-                "Points outside the limits indicate the forecast is 'out of control'."
+                "Shewhart-style individuals control chart for day-ahead demand "
+                "forecast performance. Plots the absolute error |Demand − Forecast| "
+                "for every hour in the rolling 3-month window against two control "
+                "limits derived from this BA's own historical distribution: P90 "
+                "(early-warning) and P95 (out-of-control). Unlike a fixed-MW "
+                "threshold, percentile-based limits adapt to each BA's natural "
+                "error scale, so a small BA with 500 MWh errors can be flagged "
+                "while PJM is not — even though PJM's absolute errors are larger."
             ),
         )
         ba_err = get_ba_error_distribution(_D["demand"], sel_ba)
@@ -731,8 +850,13 @@ elif page == PAGE_ANOMALY:
                     line_dash="dash",
                     line_color=C_RED,
                     line_width=1.5,
-                    annotation_text=f"P95 = {p95:,.0f}",
+                    annotation_text=f"<b>P95 = {p95:,.0f}</b>",
                     annotation_font=dict(color=C_RED, size=11),
+                    annotation_bgcolor="white",
+                    annotation_bordercolor=C_RED,
+                    annotation_borderwidth=1,
+                    annotation_borderpad=4,
+                    annotation_position="top right",
                 )
             if p90:
                 fig.add_hline(
@@ -740,20 +864,47 @@ elif page == PAGE_ANOMALY:
                     line_dash="dot",
                     line_color=C_AMBER,
                     line_width=1.2,
-                    annotation_text=f"P90 = {p90:,.0f}",
+                    annotation_text=f"<b>P90 = {p90:,.0f}</b>",
                     annotation_font=dict(color=C_AMBER, size=11),
+                    annotation_bgcolor="white",
+                    annotation_bordercolor=C_AMBER,
+                    annotation_borderwidth=1,
+                    annotation_borderpad=4,
                     annotation_position="bottom right",
                 )
             fig.update_layout(xaxis_title="", yaxis_title="Absolute Error (MWh)")
             _style(fig)
             st.plotly_chart(fig, use_container_width=True)
+            _source(
+                f"EIA Form 930 hourly demand and day-ahead forecast for {sel_ba}, "
+                "retrieved via EIA API v2 (<code>electricity/rto/region-data</code>)."
+            )
+            _methodology(
+                "<b>Absolute forecast error</b>: "
+                "<code>abs_error<sub>t</sub> = |demand<sub>t</sub> − "
+                "forecast<sub>t</sub>|</code><br/>"
+                "<b>Control limits</b>: P90 and P95 are the 90th and 95th "
+                "percentiles of the full historical <code>abs_error</code> "
+                "series for this BA over the rolling 3-month window.<br/>"
+                "<b>Alert rule</b> (Shewhart-style, applied to the last 6 hours): "
+                "<code>RED</code> if ≥3 hours exceed P95; <code>YELLOW</code> if "
+                "≥3 exceed P90; otherwise <code>NORMAL</code>. The rule requires "
+                "<i>sustained</i> deviation, not a single outlier, to avoid false "
+                "alarms from isolated data-entry errors."
+            )
 
         # Violin
         st.subheader(
             "Cross-BA Error Comparison",
             help=(
-                "Violin plots show the full distribution shape and density of "
-                "forecast errors for each BA. Wider regions = more frequent errors."
+                "Kernel-density violin plots comparing the full distribution of "
+                "absolute forecast errors across all 10 tracked BAs. The embedded "
+                "box shows median and IQR; the violin width at each y-value is "
+                "proportional to the density of hours at that error level. "
+                "Y-axis is logarithmic because error magnitudes span two to three "
+                "orders of magnitude across BAs (small BAs like BPAT vs. large "
+                "ones like PJM), and linear scale would compress the smaller BAs "
+                "into an unreadable strip."
             ),
         )
         all_err = []
@@ -765,17 +916,44 @@ elif page == PAGE_ANOMALY:
                 all_err.append(e)
         if all_err:
             err_df = pd.concat(all_err, ignore_index=True)
+            # Drop non-positive values so log scale doesn't explode
+            err_df = err_df[err_df["abs_error"] > 0]
+            # Order BAs by median error so the plot reads top-to-bottom best→worst
+            median_order = err_df.groupby("BA")["abs_error"].median().sort_values().index.tolist()
             fig_v = px.violin(
                 err_df,
-                x="BA",
-                y="abs_error",
+                y="BA",
+                x="abs_error",
                 box=True,
                 points=False,
+                orientation="h",
                 color_discrete_sequence=[C_PRIMARY],
-                labels={"abs_error": "Absolute Error (MWh)", "BA": ""},
+                labels={"abs_error": "Absolute Error (MWh, log scale)", "BA": ""},
+                category_orders={"BA": median_order},
+                log_x=True,
             )
-            _style(fig_v, h=400)
+            fig_v.update_traces(width=0.85, meanline_visible=True)
+            _style(fig_v, h=560)
             st.plotly_chart(fig_v, use_container_width=True)
+            _source(
+                "EIA Form 930 hourly demand and day-ahead forecast across all 10 "
+                "tracked BAs, retrieved via EIA API v2."
+            )
+            _methodology(
+                "<b>Distribution</b>: for each BA, all hourly "
+                "<code>abs_error<sub>t</sub> = |demand<sub>t</sub> − "
+                "forecast<sub>t</sub>|</code> values in the rolling 3-month "
+                "window.<br/>"
+                "<b>Violin width</b>: Gaussian kernel density estimate of the "
+                "error distribution. Wider regions indicate error magnitudes "
+                "that occur more frequently.<br/>"
+                "<b>Box elements</b>: box edges = Q1 and Q3; center line = "
+                "median; whiskers = 1.5 × IQR beyond the box.<br/>"
+                "<b>Ordering</b>: BAs are sorted top-to-bottom by median "
+                "absolute error, lowest first. Reading down the list is equivalent "
+                "to scanning from best- to worst-performing forecasts in absolute "
+                "terms (before normalizing by demand size)."
+            )
 
         _section_divider()
 
@@ -783,9 +961,14 @@ elif page == PAGE_ANOMALY:
         st.subheader(
             "LMP Price Anomalies",
             help=(
-                "Locational marginal price spike and negative-price detection. "
-                "SPIKE = recent 6h average exceeds historical median by 3× or more. "
-                "NEGATIVE = any recent hour priced below −$10/MWh."
+                "Detects price dislocations at ISO pricing nodes (zones and hubs). "
+                "Two event classes are flagged: <b>SPIKE</b> — sustained high prices, "
+                "typically driven by scarcity, transmission congestion, or supply "
+                "shortfalls; and <b>NEGATIVE</b> — sub-zero prices, which occur "
+                "when must-run or subsidized generation (wind, nuclear, thermal "
+                "minimums) exceeds load and generators pay the grid to keep "
+                "producing. Both signal real dispatch and hedging opportunities "
+                "for market participants with flexible load or storage."
             ),
         )
 
@@ -835,6 +1018,36 @@ elif page == PAGE_ANOMALY:
                 if norm.empty:
                     st.caption("None.")
 
+            _source(
+                "Day-ahead hourly LMP for CAISO and ERCOT zones/hubs, retrieved "
+                "via the <code>gridstatus</code> Python library "
+                "(CAISO OASIS <code>PRC_LMP</code> API and ERCOT MIS reports)."
+            )
+            _methodology(
+                "<b>Inputs</b>: hourly day-ahead LMP series "
+                "(<code>lmp<sub>t</sub></code>) for each ISO × location pair over "
+                "the last 30 days. Only <code>ZONE</code>, <code>HUB</code>, and "
+                "<code>TRADING_HUB</code> locations are retained; resource-node "
+                "LMPs are excluded.<br/>"
+                "<b>Baseline</b>: <code>median<sub>hist</sub></code> = median of "
+                "all historical LMP observations for the location. Locations with "
+                "non-positive medians are dropped to avoid undefined spike "
+                "ratios.<br/>"
+                "<b>Recent window</b>: last 6 hours of LMP data. "
+                "<code>avg<sub>6h</sub></code>, <code>min<sub>6h</sub></code>, "
+                "and <code>max<sub>6h</sub></code> are the mean, min, and max "
+                "over this window.<br/>"
+                "<b>Classification</b>:<br/>"
+                "&nbsp;&nbsp;• <code>SPIKE</code> if "
+                "<code>avg<sub>6h</sub> > 3 × median<sub>hist</sub></code>"
+                " (multiplier = <code>LMP_SPIKE_MULTIPLIER</code>)<br/>"
+                "&nbsp;&nbsp;• <code>NEGATIVE</code> if "
+                "<code>min<sub>6h</sub> < −$10/MWh</code>"
+                " (threshold = <code>LMP_NEGATIVE_THRESHOLD</code>)<br/>"
+                "&nbsp;&nbsp;• <code>NORMAL</code> otherwise. SPIKE takes priority "
+                "over NEGATIVE when both conditions apply."
+            )
+
             # Time series for a selected location
             st.markdown("**LMP time series — drill down**")
             iso_options = sorted(lmp_alerts["iso"].unique().tolist())
@@ -864,20 +1077,57 @@ elif page == PAGE_ANOMALY:
                         y=median,
                         line_dash="dot",
                         line_color=C_SLATE,
-                        annotation_text=f"Median = ${median:,.1f}",
+                        annotation_text=f"<b>Median = ${median:,.1f}</b>",
                         annotation_font=dict(color=C_SLATE, size=10),
+                        annotation_bgcolor="white",
+                        annotation_bordercolor=C_SLATE,
+                        annotation_borderwidth=1,
+                        annotation_borderpad=4,
+                        annotation_position="top left",
                     )
                     fig_lmp.add_hline(
                         y=median * 3,
                         line_dash="dash",
                         line_color=C_RED,
-                        annotation_text=f"Spike threshold = ${median * 3:,.1f}",
+                        annotation_text=f"<b>Spike threshold = ${median * 3:,.1f}</b>",
                         annotation_font=dict(color=C_RED, size=10),
+                        annotation_bgcolor="white",
+                        annotation_bordercolor=C_RED,
+                        annotation_borderwidth=1,
+                        annotation_borderpad=4,
+                        annotation_position="top right",
                     )
-                fig_lmp.add_hline(y=-10, line_dash="dash", line_color=C_AMBER)
+                fig_lmp.add_hline(
+                    y=-10,
+                    line_dash="dash",
+                    line_color=C_AMBER,
+                    annotation_text="<b>Negative threshold = −$10</b>",
+                    annotation_font=dict(color=C_AMBER, size=10),
+                    annotation_bgcolor="white",
+                    annotation_bordercolor=C_AMBER,
+                    annotation_borderwidth=1,
+                    annotation_borderpad=4,
+                    annotation_position="bottom right",
+                )
                 fig_lmp.update_layout(xaxis_title="", yaxis_title="LMP ($/MWh)")
                 _style(fig_lmp, h=380)
                 st.plotly_chart(fig_lmp, use_container_width=True)
+                _source(
+                    f"Day-ahead hourly LMP for {iso_pick} {loc_pick}, retrieved "
+                    "via the <code>gridstatus</code> library over a 30-day window."
+                )
+                _methodology(
+                    "The three horizontal reference lines show the thresholds "
+                    "applied by the classifier above:<br/>"
+                    "&nbsp;&nbsp;• <b>Median line</b> = historical median LMP for "
+                    "this location across the full 30-day window.<br/>"
+                    "&nbsp;&nbsp;• <b>Spike threshold</b> = <code>3 × median</code>. "
+                    "Hours with 6-hour rolling average above this line feed the "
+                    "SPIKE classification.<br/>"
+                    "&nbsp;&nbsp;• <b>Negative threshold</b> = <code>−$10/MWh</code>. "
+                    "Any recent hour below this line feeds the NEGATIVE "
+                    "classification."
+                )
 
     st.caption(f"Loaded in {time.time() - t0:.2f}s")
 
@@ -911,7 +1161,16 @@ elif page == PAGE_ARBITRAGE:
 
         st.subheader(
             "Top Opportunities — NERC Peak (14–20h)",
-            help="Routes ranked by signal strength. High score = large, consistent flow.",
+            help=(
+                "Three-panel comparison of the top 8 inter-BA interchange routes "
+                "ranked by composite Signal Score. Each panel shows one input to "
+                "the score so you can see <i>why</i> a route ranks where it does: "
+                "absolute flow magnitude (how much power moves), and flow "
+                "consistency (how stable the direction is hour-to-hour). The "
+                "NERC peak window (14:00–20:00 local) is when price spreads "
+                "are structurally largest, so we isolate flows during that "
+                "window rather than averaging across all 24 hours."
+            ),
         )
         top8 = disp.head(8).sort_values("signal_score")
         fig = make_subplots(
@@ -964,11 +1223,44 @@ elif page == PAGE_ARBITRAGE:
         fig.update_layout(yaxis=dict(categoryorder="total ascending"))
         _style(fig, h=420)
         st.plotly_chart(fig, use_container_width=True)
+        _source(
+            "EIA Form 930 hourly interchange data across all BA pairs, "
+            "filtered to NERC peak hours (14:00–20:00)."
+        )
+        _methodology(
+            "<b>Inputs</b> (per BA pair, averaged over peak hours only):<br/>"
+            "&nbsp;&nbsp;• <code>peak_flow</code> = mean hourly interchange "
+            "in MWh (signed, positive = export from <code>fromba</code>)<br/>"
+            "&nbsp;&nbsp;• <code>peak_volatility</code> = mean hourly "
+            "standard deviation of interchange during peak<br/><br/>"
+            "<b>Normalization</b> (across all pairs):<br/>"
+            "&nbsp;&nbsp;• <code>directional_strength = "
+            "|peak_flow| / max(|peak_flow|)</code>"
+            " — scales 0 to 1, highest-flow pair = 1<br/>"
+            "&nbsp;&nbsp;• <code>consistency = 1 − "
+            "(peak_volatility / max_volatility)</code>"
+            " — scales 0 to 1, lowest-volatility pair = 1<br/><br/>"
+            "<b>Composite score</b>:<br/>"
+            "&nbsp;&nbsp;<code>signal_score = "
+            "100 × (0.6 × directional_strength + 0.4 × consistency)</code><br/><br/>"
+            "<b>Interpretation</b>: directional strength weighted higher (60%) "
+            "because a large-magnitude persistent flow is a stronger arbitrage "
+            "indicator than a small-but-steady one. A route scoring ~80+ "
+            "typically represents a structural, non-random congestion signal "
+            "worth investigating for cross-market hedging or dispatch arbitrage."
+        )
 
         # Detail table
         st.subheader(
             "Signal Details",
-            help="Direction = net flow direction. Volatility: lower = more consistent.",
+            help=(
+                "Tabular view of the top 12 routes with the underlying raw "
+                "metrics. <b>Direction</b> reflects the sign of <code>peak_flow</code> "
+                "(export if positive, import if negative). <b>Volatility</b> is "
+                "the hour-to-hour std-dev of flow during peak hours — lower is "
+                "more consistent. <b>Score</b> is the same composite as plotted "
+                "above, reproduced here for numerical comparison and CSV export."
+            ),
         )
         tbl = disp[
             ["route", "direction", "peak_avg_flow", "peak_volatility", "signal_score"]
@@ -985,13 +1277,26 @@ elif page == PAGE_ARBITRAGE:
             use_container_width=True,
             hide_index=True,
         )
+        _source(
+            "EIA Form 930 hourly interchange, aggregated to NERC peak hours "
+            "over the full 3-month window."
+        )
 
         _section_divider()
 
         # Heatmap
         st.subheader(
             "24-Hour Flow Heatmap",
-            help="Red = export, blue = import. Shaded band = NERC peak hours.",
+            help=(
+                "Diurnal flow signature for the top 8 arbitrage routes, showing "
+                "average interchange at every hour of day averaged across the "
+                "3-month window. Red cells = export direction, blue = import. "
+                "The shaded vertical band marks the NERC peak window "
+                "(14:00–20:00). Reading each row horizontally reveals the "
+                "daily flow rhythm — a route that alternates red/blue across "
+                "the day is behaving differently than one that's solidly one "
+                "color, even if their average magnitudes are similar."
+            ),
         )
         patterns = compute_interchange_patterns(_D["interchange"])
         if not patterns.empty:
@@ -1038,13 +1343,38 @@ elif page == PAGE_ARBITRAGE:
                 )
                 _style(fig_h, h=380)
                 st.plotly_chart(fig_h, use_container_width=True)
+                _source(
+                    "EIA Form 930 hourly interchange for the top 8 arbitrage "
+                    "routes, grouped by hour-of-day over the 3-month window."
+                )
+                _methodology(
+                    "For each BA pair <code>(fromba, toba)</code>:<br/>"
+                    "&nbsp;&nbsp;1. Filter hourly interchange to this pair.<br/>"
+                    "&nbsp;&nbsp;2. Group by <code>hour = period.hour</code> "
+                    "(0–23) and compute <code>mean(value)</code> across all "
+                    "observations at that hour.<br/>"
+                    "&nbsp;&nbsp;3. Resulting 24-cell row is the pair's typical "
+                    "diurnal flow shape.<br/><br/>"
+                    "Color scale is symmetric: "
+                    "<code>zmin = −max(|flow|)</code>, "
+                    "<code>zmax = +max(|flow|)</code>, centered at zero. "
+                    "This ensures a cell's hue encodes direction (red/blue) "
+                    "while its saturation encodes magnitude."
+                )
 
         _section_divider()
 
         # Route profile
         st.subheader(
             "Route Profile",
-            help="Hourly flow profile for a single route. Shaded region = NERC peak hours.",
+            help=(
+                "Drill-down view of a single route's 24-hour flow profile. Each "
+                "bar shows the average interchange at that hour, with color "
+                "indicating direction (blue = export, red = import). Use this "
+                "to distinguish between structurally one-way routes (mostly "
+                "single color) and bi-directional load-following routes "
+                "(alternating colors across the day)."
+            ),
         )
         pair_opts = [f"{r['fromba']} → {r['toba']}" for _, r in signals.head(10).iterrows()]
         sel_pair = st.selectbox("Select route", pair_opts)
@@ -1080,15 +1410,34 @@ elif page == PAGE_ARBITRAGE:
                 )
                 _style(fig_p, h=380)
                 st.plotly_chart(fig_p, use_container_width=True)
+                _source(
+                    f"EIA Form 930 hourly interchange for {sel_pair}, "
+                    "grouped by hour-of-day across the 3-month window."
+                )
+                _methodology(
+                    "Each bar is the mean of <code>value</code> for the "
+                    f"<code>fromba={parts[0]}, toba={parts[1]}</code> "
+                    "interchange series, grouped by hour-of-day (0–23).<br/>"
+                    "Bar color: <code>blue</code> if <code>avg_flow > 0</code> "
+                    "(export from <code>fromba</code>), <code>red</code> "
+                    "otherwise. Signed aggregation preserves direction — if "
+                    "this route is truly bidirectional, a simple mean will "
+                    "produce a smaller net value than the absolute flows "
+                    "you'd see instantaneously."
+                )
 
     # ---------- ISO zonal LMP spreads ----------
     _section_divider()
     st.subheader(
         "ISO-Internal Zonal Spreads",
         help=(
-            "Price spreads between zones/hubs within each ISO. Large persistent "
-            "spreads indicate transmission congestion and intra-ISO arbitrage "
-            "opportunity. Score = 60% peak-hour spread strength + 40% consistency."
+            "Where inter-BA flows (above) capture macro-level arbitrage between "
+            "ISOs, zonal spreads capture micro-level arbitrage <i>within</i> a "
+            "single ISO. Each row is a price difference between two zones or "
+            "hubs inside the same ISO. Persistent spreads during peak hours "
+            "indicate transmission constraints binding more often than not — "
+            "valuable intel for virtual bidders, congestion revenue rights (CRR) "
+            "traders, and storage operators choosing where to site new capacity."
         ),
     )
     spreads = _S["lmp_spreads"]
@@ -1137,6 +1486,34 @@ elif page == PAGE_ARBITRAGE:
         fig_sp.update_layout(yaxis=dict(categoryorder="total ascending"))
         _style(fig_sp, h=460)
         st.plotly_chart(fig_sp, use_container_width=True)
+        _source(
+            "Day-ahead hourly LMP for all CAISO and ERCOT zones/hubs over a "
+            "30-day window, retrieved via the <code>gridstatus</code> library."
+        )
+        _methodology(
+            "For every pair of distinct locations <code>(A, B)</code> within "
+            "the same ISO:<br/>"
+            "&nbsp;&nbsp;1. Compute the hourly spread series "
+            "<code>spread<sub>t</sub> = lmp<sub>A,t</sub> − lmp<sub>B,t</sub></code> "
+            "(must share a timestamp).<br/>"
+            "&nbsp;&nbsp;2. Skip pairs with fewer than 24 hours of overlapping "
+            "data to ensure statistical reliability.<br/>"
+            "&nbsp;&nbsp;3. Compute: "
+            "<code>mean_spread = mean(|spread|)</code>, "
+            "<code>peak_spread = mean(|spread|)</code> restricted to NERC peak "
+            "hours (14:00–20:00), and "
+            "<code>volatility = std(spread)</code>.<br/><br/>"
+            "<b>Score</b> (same structure as inter-BA score):<br/>"
+            "&nbsp;&nbsp;<code>strength = peak_spread / max(peak_spread)</code><br/>"
+            "&nbsp;&nbsp;<code>consistency = 1 − volatility / max(volatility)</code>"
+            "<br/>"
+            "&nbsp;&nbsp;<code>score = 100 × (0.6 × strength + 0.4 × consistency)</code>"
+            "<br/><br/>"
+            "Signal score is <i>symmetric</i> — "
+            "<code>A ↔ B</code> and <code>B ↔ A</code> are counted once, using "
+            "absolute spread. To know which zone is expensive in which hour, "
+            "inspect the signed spread in the underlying data."
+        )
 
         spread_tbl = top_spreads[
             [
@@ -1172,6 +1549,12 @@ elif page == PAGE_ARBITRAGE:
         )
 
     st.caption(f"Loaded in {time.time() - t0:.2f}s")
+
+
+# ===================================================================
+# 🌱 TRANSITION SCORING
+# ===================================================================
+elif page == PAGE_TRANSITION:
     t0 = time.time()
     st.title("🌱 Transition Scoring")
     _cross_ref(
@@ -1197,7 +1580,15 @@ elif page == PAGE_ARBITRAGE:
         # Composite ranking
         st.subheader(
             "Composite Ranking",
-            help="Higher score = greater renewable investment opportunity.",
+            help=(
+                "BAs ranked by the final 0–100 composite Transition Score, "
+                "combining six equally-important analytical dimensions covering "
+                "operational pressure (demand growth, import dependence), fuel "
+                "mix position (renewable headroom, fossil transition), and "
+                "developer validation (queue activity, queue completion). "
+                "Higher score means clean-energy investment is likely to be "
+                "economically attractive AND physically feasible at this BA."
+            ),
         )
         s = scores.sort_values("composite_score")
         fig = go.Figure(
@@ -1222,13 +1613,53 @@ elif page == PAGE_ARBITRAGE:
         )
         _style(fig, h=440)
         st.plotly_chart(fig, use_container_width=True)
+        _source(
+            "EIA Form 930 (demand, fuel mix, interchange over rolling 3-month "
+            "window) + LBNL Queued Up interconnection queue dataset "
+            "(<code>queue_ba_summary</code>, thru 2024)."
+        )
+        _methodology(
+            "Each of the six factor scores is computed independently on its "
+            "native 0–100 scale (details in individual factor tooltips below), "
+            "then combined via weighted sum:<br/><br/>"
+            "<code>composite = 0.15 × demand_growth</code><br/>"
+            "<code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            "+ 0.15 × renewable_headroom</code><br/>"
+            "<code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            "+ 0.15 × import_dependence</code><br/>"
+            "<code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            "+ 0.15 × fossil_transition</code><br/>"
+            "<code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            "+ 0.20 × queue_active</code><br/>"
+            "<code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            "+ 0.20 × queue_completion</code><br/><br/>"
+            "<b>Weight rationale</b>: the four EIA-derived factors each get "
+            "15% because they describe the same underlying thing "
+            "(operational conditions) from different angles. The two LBNL "
+            "queue factors each get 20% because they reflect "
+            "<i>developer-revealed preference</i> — real capital is being "
+            "staked, which is the strongest available signal of actual "
+            "investment viability.<br/><br/>"
+            "<b>Fallback</b>: if LBNL queue data is unavailable for a given "
+            "BA, the composite reduces to the four EIA factors at equal 25% "
+            "weighting."
+        )
 
         # Radar + table
         col_r, col_t = st.columns([1, 1])
         with col_r:
             st.subheader(
                 f"Six-Factor Profile — {sel_ba}",
-                help="Radar shows all six scoring dimensions. Larger shape = stronger overall.",
+                help=(
+                    "Radar plot decomposes the composite score into its six "
+                    "component scores for the selected BA. The shape reveals "
+                    "which dimensions drive the composite: a large symmetric "
+                    "polygon means balanced opportunity, while a jagged shape "
+                    "means the BA scores high on some factors (e.g., renewable "
+                    "headroom) but low on others (e.g., queue activity). "
+                    "A BA with identical composite scores to another can have "
+                    "very different risk/opportunity profiles visible here."
+                ),
             )
             ba_s = scores[scores["ba"] == sel_ba]
             if not ba_s.empty:
@@ -1271,6 +1702,38 @@ elif page == PAGE_ARBITRAGE:
                 )
                 _style(fig_r, h=400)
                 st.plotly_chart(fig_r, use_container_width=True)
+                _source(f"EIA Form 930 + LBNL queue, filtered to BA {sel_ba}.")
+                _methodology(
+                    "<b>1. Demand Growth</b> — compare average daily demand "
+                    "between the first and last thirds of the 3-month window: "
+                    "<code>growth% = (late − early) / early × 100</code>. "
+                    "Score = <code>clamp(50 + 10 × growth%, 0, 100)</code>. "
+                    "Neutral BA → 50; growing BAs reward higher.<br/><br/>"
+                    "<b>2. Renewable Headroom</b> — current renewable share "
+                    "of generation: <code>renew% = sum(gen[SUN,WND,WAT]) / "
+                    "sum(gen_all) × 100</code>. "
+                    "Score = <code>max(100 − renew%, 0)</code>. "
+                    "Low current renewables → high room to add more → high "
+                    "score.<br/><br/>"
+                    "<b>3. Import Dependence</b> — net interchange position: "
+                    "<code>score = clamp(50 − 50 × (net_avg / p95_abs_flow), "
+                    "0, 100)</code>. "
+                    "Net importers score above 50 (local generation addition "
+                    "displaces expensive imports).<br/><br/>"
+                    "<b>4. Fossil Transition</b> — fossil share of current "
+                    "generation: <code>score = min(fossil% , 100)</code>. "
+                    "High fossil % → more fossil to displace → higher "
+                    "transition opportunity.<br/><br/>"
+                    "<b>5. Queue Activity</b> — active MW in LBNL queue "
+                    "normalized across all BAs: <code>score = 100 × "
+                    "active_mw / max(active_mw)</code>. Captures developer "
+                    "interest in this BA.<br/><br/>"
+                    "<b>6. Queue Completion</b> — historical build-out "
+                    "success: <code>completion_rate = operational / "
+                    "(operational + withdrawn)</code>, then <code>score = "
+                    "100 × completion_rate</code>. Captures whether the BA's "
+                    "interconnection process actually delivers projects."
+                )
 
         with col_t:
             st.subheader("All Scores", help="Sorted by composite score.")
@@ -1296,6 +1759,10 @@ elif page == PAGE_ARBITRAGE:
                 hide_index=True,
                 height=420,
             )
+            _source(
+                "Pre-aggregated from EIA Form 930 and LBNL Queued Up dataset. "
+                "Full per-factor derivations shown in the radar tooltip to the left."
+            )
 
         _section_divider()
 
@@ -1303,8 +1770,14 @@ elif page == PAGE_ARBITRAGE:
         st.subheader(
             "Interconnection Queue — LBNL Project Pipeline",
             help=(
-                "Active = approved or under study. Operational = built and online. "
-                "Completion rate = operational / (operational + withdrawn)."
+                "Drill-down view of the actual interconnection queue for the "
+                "selected BA, sourced from Berkeley Lab's annual Queued Up "
+                "report. <b>Active</b> = approved or under study (real capital "
+                "at stake); <b>Operational</b> = built and online; "
+                "<b>Completion Rate</b> = share of finalized projects that "
+                "actually got built rather than withdrawn — a proxy for how "
+                "permissive or restrictive the BA's interconnection process is. "
+                "High completion rate + high active capacity = investable BA."
             ),
         )
         if _D["queue_ba"].empty:
@@ -1320,22 +1793,39 @@ elif page == PAGE_ARBITRAGE:
                 qm1.metric(
                     "Active Projects",
                     f"{int(row['active_projects']):,}",
-                    help="Projects currently in the queue under review.",
+                    help=(
+                        "Count of projects with <code>q_status = 'active'</code> "
+                        "— projects with signed queue applications still under "
+                        "study or awaiting interconnection agreement execution."
+                    ),
                 )
                 qm2.metric(
                     "Active Capacity",
                     f"{row['active_capacity_mw']:,.0f} MW",
+                    help=(
+                        "Sum of <code>mw1</code> (nameplate capacity at POI) "
+                        "across active-status projects. Represents the developer-"
+                        "signaled pipeline — not a forecast of actual buildout."
+                    ),
                 )
                 qm3.metric(
                     "Operational",
                     f"{int(row['operational_projects']):,}",
-                    help="Projects that have been built.",
+                    help=(
+                        "Count of projects with <code>q_status = 'operational'</code> "
+                        "— queue entries that graduated to online generation."
+                    ),
                 )
                 comp = row["completion_rate"]
                 qm4.metric(
                     "Completion Rate",
                     f"{comp * 100:.1f}%" if pd.notna(comp) else "—",
-                    help="Of finalized projects (operational or withdrawn), share built.",
+                    help=(
+                        "<code>completion_rate = operational / (operational + "
+                        "withdrawn)</code>. Excludes active projects (still in "
+                        "progress). Measures historical process success, not "
+                        "future conversion probability."
+                    ),
                 )
 
             # Resource breakdown for the selected BA
@@ -1367,6 +1857,24 @@ elif page == PAGE_ARBITRAGE:
                 )
                 _style(fig_qt, h=360)
                 st.plotly_chart(fig_qt, use_container_width=True)
+                _source(
+                    f"LBNL <code>queue_type_summary</code> table for BA {sel_ba}, "
+                    "aggregated by <code>type_clean</code> resource category."
+                )
+                _methodology(
+                    "For each resource type:<br/>"
+                    "&nbsp;&nbsp;• <code>active_mw</code> = "
+                    "<code>sum(mw1)</code> for rows where "
+                    "<code>q_status = 'active'</code><br/>"
+                    "&nbsp;&nbsp;• <code>operational_mw</code> = "
+                    "<code>sum(mw1)</code> for rows where "
+                    "<code>q_status = 'operational'</code><br/><br/>"
+                    "A large Active bar with a small Operational bar signals "
+                    "a resource class that's <i>surging now</i> (e.g., battery "
+                    "storage in most BAs, or solar+storage hybrids in ERCOT). "
+                    "A large Operational bar with small Active signals a "
+                    "mature deployment that's tapering off."
+                )
 
             # Cross-BA comparison: total active capacity by BA
             st.markdown("**Cross-BA: active queue capacity**")
@@ -1387,13 +1895,35 @@ elif page == PAGE_ARBITRAGE:
             )
             _style(fig_qb, h=360)
             st.plotly_chart(fig_qb, use_container_width=True)
+            _source("LBNL <code>queue_ba_summary</code> table across the 10 tracked BAs.")
+            _methodology(
+                "Single aggregation per BA: <code>active_capacity_mw = "
+                "sum(mw1)</code> restricted to "
+                "<code>q_status = 'active'</code>. BA assignment follows a "
+                "priority rule (implemented in "
+                "<code>data_fetching._assign_ba_from_state_region</code>): "
+                "(1) explicit <code>region</code> field if it matches an ISO "
+                "(PJM, CAISO, MISO, ERCOT, NYISO, ISO-NE, SPP); (2) state-"
+                "based fallback for non-ISO BAs (BPAT, TVA, SOCO). Projects "
+                "in states ambiguously covered by multiple BAs use the "
+                "primary BA for that state."
+            )
 
         _section_divider()
 
         # NREL solar resource map
         st.subheader(
             "NREL Solar Resource Map",
-            help="Annual solar GHI (kWh/m²) at sample sites across the US.",
+            help=(
+                "Geographic overlay of solar resource quality (annual Global "
+                "Horizontal Irradiance, GHI) at 47 sample locations across the "
+                "US. Darker red = higher GHI = better solar siting potential. "
+                "Blue diamonds mark the approximate centroids of the 10 tracked "
+                "BAs for geographic reference. Use this together with the "
+                "Transition Score and Queue data above to match <i>where "
+                "resource is good</i> with <i>where interconnection actually "
+                "delivers</i>."
+            ),
         )
         nrel = _D["nrel"]
         if nrel.empty:
@@ -1454,6 +1984,30 @@ elif page == PAGE_ARBITRAGE:
             )
             _style(fig_m, h=500)
             st.plotly_chart(fig_m, use_container_width=True)
+            _source(
+                "NREL Solar Resource API "
+                "(<code>/api/solar/solar_resource/v1.json</code>) at 47 "
+                "sampled locations covering all tracked BAs. BA centroids are "
+                "analytical approximations, not administrative coordinates."
+            )
+            _methodology(
+                "<b>GHI (Global Horizontal Irradiance)</b>: total solar "
+                "radiation received on a horizontal surface, averaged "
+                "annually, in <code>kWh/m²/day</code>. Units here are "
+                "reported as the annual average daily value. Represents the "
+                "theoretical maximum energy a flat-panel PV system could "
+                "capture before losses.<br/><br/>"
+                "<b>DNI (Direct Normal Irradiance)</b> (shown on hover): "
+                "solar radiation on a surface perpendicular to the sun's "
+                "rays. Relevant for concentrating solar power (CSP) and "
+                "single-axis tracking PV. Higher DNI/GHI ratios indicate "
+                "clearer, less diffuse sky conditions.<br/><br/>"
+                "<b>Sampling</b>: one NREL API call per sampled point, "
+                "parsed from the <code>outputs.avg_ghi.annual</code> and "
+                "<code>outputs.avg_dni.annual</code> fields. Points are "
+                "chosen to span state centroids and key metros to avoid "
+                "sample clustering."
+            )
 
     st.caption(f"Loaded in {time.time() - t0:.2f}s")
 
@@ -1494,20 +2048,53 @@ elif page == PAGE_COMPLIANCE:
     with c1:
         if "demand" in sec:
             d = sec["demand"]
-            st.subheader("§1 Demand", help="Hourly demand statistics.")
+            st.subheader(
+                "§1 Demand",
+                help=(
+                    "Load-side operational summary for the reporting period. "
+                    "Peak/min demand bracket the BA's operating envelope; "
+                    "average demand anchors capacity-factor calculations and "
+                    "is the denominator for MAPE in §2. Hours Reported is a "
+                    "data-quality signal — it should be close to "
+                    "<code>24 × number_of_days</code>; shortfalls indicate "
+                    "reporting gaps on the EIA side."
+                ),
+            )
             m1, m2 = st.columns(2)
             m1.metric("Avg Demand", f"{d['avg_demand_mwh']:,.0f} MWh")
             m2.metric("Peak Demand", f"{d['peak_demand_mwh']:,.0f} MWh")
             m3, m4 = st.columns(2)
             m3.metric("Min Demand", f"{d['min_demand_mwh']:,.0f} MWh")
             m4.metric("Hours Reported", f"{d['total_hours']:,}")
+            _source(
+                f"EIA Form 930 <code>type-name = 'Demand'</code> for {sel_ba}, "
+                "over the full 3-month rolling window."
+            )
+            _methodology(
+                "<code>avg_demand = mean(value)</code>; "
+                "<code>peak_demand = max(value)</code>; "
+                "<code>min_demand = min(value)</code>; "
+                "<code>total_hours = count(value)</code>, all computed on the "
+                "<code>Demand</code> rows of <code>hourly_demand</code>."
+            )
 
     with c2:
         if "forecast_accuracy" in sec:
             fa = sec["forecast_accuracy"]
             st.subheader(
                 "§2 Forecast Accuracy",
-                help="MAPE: lower = better. Bias: positive = demand > forecast.",
+                help=(
+                    "Day-ahead demand forecast performance. <b>MAPE</b> "
+                    "(Mean Absolute Percentage Error) is the standard "
+                    "industry metric — lower is better, with 1–3% typical "
+                    "for mature BAs. <b>MAE</b> (Mean Absolute Error) is "
+                    "the MWh magnitude, useful for sizing reserves. "
+                    "<b>Bias</b> is the signed mean error: positive means "
+                    "the BA systematically under-forecasts demand (actual "
+                    "exceeds forecast), negative means it over-forecasts. "
+                    "Persistent bias indicates a correctable model issue; "
+                    "near-zero bias with high MAE indicates random error."
+                ),
             )
             m1, m2 = st.columns(2)
             m1.metric("MAPE", f"{fa['mape']:.2f}%")
@@ -1515,6 +2102,21 @@ elif page == PAGE_COMPLIANCE:
             m3, m4 = st.columns(2)
             m3.metric("Max Error", f"{fa['max_error_mwh']:,.0f} MWh")
             m4.metric("Bias", f"{fa['bias_mwh']:,.0f} MWh")
+            _source(
+                "EIA Form 930 <code>Demand</code> and <code>Day-ahead demand "
+                f"forecast</code> rows for {sel_ba}, pivoted and differenced."
+            )
+            _methodology(
+                "Let <code>error<sub>t</sub> = demand<sub>t</sub> − "
+                "forecast<sub>t</sub></code>. Then:<br/>"
+                "&nbsp;&nbsp;• <code>MAPE = mean( |error<sub>t</sub>| / "
+                "demand<sub>t</sub> ) × 100</code>  "
+                "<i>(hours with demand = 0 excluded)</i><br/>"
+                "&nbsp;&nbsp;• <code>MAE = mean( |error<sub>t</sub>| )</code><br/>"
+                "&nbsp;&nbsp;• <code>Max Error = max( |error<sub>t</sub>| )</code><br/>"
+                "&nbsp;&nbsp;• <code>Bias = mean( error<sub>t</sub> )</code>"
+                " — signed, not absolute"
+            )
 
     _section_divider()
     c3, c4 = st.columns(2)
@@ -1523,7 +2125,16 @@ elif page == PAGE_COMPLIANCE:
             ix = sec["interchange"]
             st.subheader(
                 "§3 Interchange",
-                help="Positive = net export. Negative = net import.",
+                help=(
+                    "Cross-border electricity trade. <b>Avg Net</b> "
+                    "characterizes the BA's structural role: positive = net "
+                    "exporter over the period, negative = net importer. "
+                    "<b>Partners</b> counts how many distinct BAs this BA "
+                    "exchanges power with — a proxy for transmission "
+                    "connectivity and market optionality. <b>Peak Export / "
+                    "Import</b> give the 24-hour envelope of directional "
+                    "flow extremes."
+                ),
             )
             m1, m2 = st.columns(2)
             m1.metric("Avg Net", f"{ix['avg_net_mwh']:,.0f} MWh")
@@ -1531,11 +2142,37 @@ elif page == PAGE_COMPLIANCE:
             m3, m4 = st.columns(2)
             m3.metric("Peak Export", f"{ix['peak_export_mwh']:,.0f} MWh")
             m4.metric("Peak Import", f"{ix['peak_import_mwh']:,.0f} MWh")
+            _source(
+                "EIA Form 930 <code>hourly_interchange</code> rows where "
+                f"<code>fromba = {sel_ba}</code>."
+            )
+            _methodology(
+                "EIA convention: positive <code>value</code> = export, "
+                "negative = import.<br/>"
+                "&nbsp;&nbsp;• <code>avg_net = mean(value)</code><br/>"
+                "&nbsp;&nbsp;• <code>peak_export = max(value)</code> "
+                "(most positive single hour)<br/>"
+                "&nbsp;&nbsp;• <code>peak_import = min(value)</code> "
+                "(most negative single hour)<br/>"
+                "&nbsp;&nbsp;• <code>n_trading_partners = "
+                "nunique(toba)</code> — count of distinct destinations"
+            )
 
     with c4:
         if "generation_mix" in sec:
             gm = sec["generation_mix"]
-            st.subheader("§4 Generation Mix", help="Fuel shares in total generation.")
+            st.subheader(
+                "§4 Generation Mix",
+                help=(
+                    "Share of total generation by fuel type over the reporting "
+                    "period. Ordered by share magnitude. High gas or coal share "
+                    "implies sensitivity to fuel-price volatility (§ Henry Hub "
+                    "price) and higher emissions intensity. Rising solar/wind "
+                    "share reflects installed-capacity transitions visible over "
+                    "the 3-month window; material shifts in mix are rare over "
+                    "short windows and usually indicate seasonality."
+                ),
+            )
             if gm["fuel_shares_pct"]:
                 mix_df = pd.DataFrame(
                     [
@@ -1561,6 +2198,20 @@ elif page == PAGE_COMPLIANCE:
                 )
                 _style(fig, h=280)
                 st.plotly_chart(fig, use_container_width=True)
+                _source(
+                    f"EIA Form 930 <code>hourly_fuel_type</code> rows for "
+                    f"{sel_ba} aggregated over the full 3-month window."
+                )
+                _methodology(
+                    "For each fuel type <code>f</code>:<br/>"
+                    "&nbsp;&nbsp;<code>share<sub>f</sub> = sum(value | "
+                    "fueltype = f) / sum(value<sub>all</sub>) × 100</code>"
+                    "<br/><br/>"
+                    "Shares sum to 100% by construction. EIA reports "
+                    "hourly values as MW (instantaneous generation); "
+                    "aggregation by sum treats each hour as a 1 MWh bucket, "
+                    "which is the correct energy-weighted interpretation."
+                )
 
     _section_divider()
 
@@ -1568,9 +2219,15 @@ elif page == PAGE_COMPLIANCE:
     st.subheader(
         "§5 Cross-Module Signals",
         help=(
-            "Injects the latest anomaly status from the Anomaly Detection module "
-            "and the composite transition score from the Transition Scoring module, "
-            "providing a consolidated regulatory + strategic snapshot."
+            "Novel addition not present in traditional compliance reports: "
+            "surfaces the latest derived signals from other analytical "
+            "modules in this platform alongside the regulatory metrics above. "
+            "Gives the reader a single view bridging operational reporting "
+            "(§1–§4) with forward-looking analytical perspectives (anomaly "
+            "status from monitoring, composite transition score, active "
+            "interconnection pipeline). Particularly useful for regulators "
+            "and internal risk teams who need context beyond point-in-time "
+            "compliance."
         ),
     )
     cross = sec.get("cross_module_signals")
@@ -1592,6 +2249,23 @@ elif page == PAGE_COMPLIANCE:
         with cm3:
             if "active_queue_mw" in cross:
                 cm3.metric("Active Queue", f"{cross['active_queue_mw']:,.0f} MW")
+        _source(
+            "Injected from the Anomaly Detection and Transition Scoring "
+            "modules for this BA. Click through to those modules for full "
+            "derivation."
+        )
+        _methodology(
+            "<b>Anomaly Status</b>: the <code>status</code> field from the "
+            "anomaly alerts table (<code>RED</code>, <code>YELLOW</code>, or "
+            "<code>NORMAL</code>). See the Anomaly Detection module for the "
+            "P90/P95 derivation.<br/><br/>"
+            "<b>Transition Score</b>: the <code>composite_score</code> from "
+            "the six-factor Transition Scoring model. See the Transition "
+            "Scoring module for the full weighting and factor derivations."
+            "<br/><br/>"
+            "<b>Active Queue (MW)</b>: the <code>active_capacity_mw</code> "
+            "from the LBNL queue summary. See Transition Scoring for methodology."
+        )
 
     _section_divider()
     st.caption("Auto-generated from EIA Form 930 data. Verify against primary sources for filings.")

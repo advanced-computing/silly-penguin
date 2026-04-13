@@ -11,7 +11,6 @@ Sources:
 from __future__ import annotations
 
 import os
-
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -431,10 +430,7 @@ def fetch_iso_lmp(
             iso_class = getattr(gridstatus, class_name)
 
             # PJM accepts api_key kwarg; others don't
-            if iso_name == "PJM":
-                iso = iso_class(api_key=os.getenv("PJM_API_KEY"))
-            else:
-                iso = iso_class()
+            iso = iso_class(api_key=os.getenv("PJM_API_KEY")) if iso_name == "PJM" else iso_class()
 
             lmp = iso.get_lmp(
                 date=start,
@@ -468,9 +464,7 @@ def fetch_iso_lmp(
                 "Congestion": "congestion",
                 "Loss": "loss",
             }
-            lmp = lmp.rename(
-                columns={k: v for k, v in rename_map.items() if k in lmp.columns}
-            )
+            lmp = lmp.rename(columns={k: v for k, v in rename_map.items() if k in lmp.columns})
 
             # Defensive: if duplicates somehow survived, keep first
             if lmp.columns.duplicated().any():
@@ -645,10 +639,7 @@ def load_lbnl_queue(
 
     if "type_clean" in df.columns:
         df["type_clean"] = (
-            df["type_clean"]
-            .astype(str)
-            .str.replace("\u00ac\u2020", " ", regex=False)
-            .str.strip()
+            df["type_clean"].astype(str).str.replace("\u00ac\u2020", " ", regex=False).str.strip()
         )
 
     df["mw1"] = pd.to_numeric(df["mw1"], errors="coerce")
@@ -664,9 +655,7 @@ def load_lbnl_queue(
                 origin=EXCEL_DATE_ORIGIN,
             )
 
-    print(
-        f"  → LBNL queue: {len(df)} projects ({df['ba'].notna().sum()} matched to a BA)"
-    )
+    print(f"  → LBNL queue: {len(df)} projects ({df['ba'].notna().sum()} matched to a BA)")
     return df
 
 

@@ -10,6 +10,8 @@ Sources:
 
 from __future__ import annotations
 
+import os
+
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -62,8 +64,21 @@ BA_WEATHER_COORDS: dict[str, tuple[float, float]] = {
 
 FUEL_TYPES = ["NG", "SUN", "WND", "NUC", "COL", "WAT", "OIL", "OTH"]
 
-# ISOs we pull LMP for (gridstatus)
-ISO_LMP_SOURCES = ["PJM", "CAISO", "ERCOT"]
+# ISOs we pull LMP for (gridstatus). PJM is auto-prepended at runtime
+# if PJM_API_KEY is set in the environment.
+ISO_LMP_SOURCES = ["CAISO", "ERCOT"]
+
+# Mapping from our ISO label → gridstatus class name. ERCOT is Pascal case
+# in gridstatus, while the others are all-caps.
+ISO_CLASS_MAP = {
+    "PJM": "PJM",
+    "CAISO": "CAISO",
+    "ERCOT": "Ercot",
+    "MISO": "MISO",
+    "NYISO": "NYISO",
+    "ISONE": "ISONE",
+    "SPP": "SPP",
+}
 
 # Mapping from our BA codes to gridstatus ISO names
 BA_TO_ISO = {
@@ -74,6 +89,16 @@ BA_TO_ISO = {
     "NYIS": "NYISO",
     "ISNE": "ISONE",
     "SWPP": "SPP",
+}
+
+ISO_CLASS_MAP = {
+    "PJM": "PJM",
+    "CAISO": "CAISO",
+    "ERCOT": "Ercot",  # ← Pascal case, not all-caps
+    "MISO": "MISO",
+    "NYISO": "NYISO",
+    "ISONE": "ISONE",
+    "SPP": "SPP",
 }
 
 # LBNL region → US state codes, used to filter queue data precisely to each BA
@@ -373,30 +398,44 @@ def _fetch_single_weather(
 # ===========================================================================
 def fetch_iso_lmp(
     isos: list[str] | None = None,
-    start_date: str = LMP_START_DATE,
-    end_date: str = LMP_END_DATE,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> pd.DataFrame:
-    """Fetch hourly day-ahead LMP for selected ISOs.
+    """Fetch hourly day-ahead LMP for selected ISOs via gridstatus.
 
-    Uses gridstatus library, which handles the differences between ISO APIs.
     Returns a unified DataFrame with columns:
       iso, time, location, location_type, market, lmp, energy, congestion, loss
     """
-    if isos is None:
-        isos = ISO_LMP_SOURCES
-
+    # Late import: only needed if this function is actually called
     import gridstatus
     from gridstatus import Markets
 
-    start = pd.Timestamp(start_date)
-    end = pd.Timestamp(end_date)
+    # Default ISO list: skip PJM unless API key is set
+    if isos is None:
+        isos = ["CAISO", "ERCOT"]
+        if os.getenv("PJM_API_KEY"):
+            isos.insert(0, "PJM")
+        else:
+            print("  ℹ Skipping PJM: PJM_API_KEY not set in environment.")
 
-    all_frames = []
+    # Default date range: last 30 days (kept inline to remain self-contained)
+    today = pd.Timestamp.now().normalize()
+    start = pd.Timestamp(start_date) if start_date else today - pd.Timedelta(days=30)
+    end = pd.Timestamp(end_date) if end_date else today
+
+    all_frames: list[pd.DataFrame] = []
     for iso_name in isos:
-        print(f"  Fetching {iso_name} LMP from {start_date} to {end_date}...")
+        print(f"  Fetching {iso_name} LMP from {start.date()} to {end.date()}...")
         try:
-            iso_class = getattr(gridstatus, iso_name)
-            iso = iso_class()
+            class_name = ISO_CLASS_MAP.get(iso_name, iso_name)
+            iso_class = getattr(gridstatus, class_name)
+
+            # PJM accepts api_key kwarg; others don't
+            if iso_name == "PJM":
+                iso = iso_class(api_key=os.getenv("PJM_API_KEY"))
+            else:
+                iso = iso_class()
+
             lmp = iso.get_lmp(
                 date=start,
                 end=end,
@@ -411,6 +450,13 @@ def fetch_iso_lmp(
             lmp = lmp.copy()
             lmp["iso"] = iso_name
 
+            # --- FIX: handle duplicate time columns BEFORE rename ---
+            # Some ISOs (notably CAISO) return both "Time" and "Interval Start".
+            # Drop "Time" if "Interval Start" is present so we don't end up
+            # with two columns named "time" after rename.
+            if "Interval Start" in lmp.columns and "Time" in lmp.columns:
+                lmp = lmp.drop(columns=["Time"])
+
             rename_map = {
                 "Time": "time",
                 "Interval Start": "time",
@@ -423,12 +469,16 @@ def fetch_iso_lmp(
                 "Loss": "loss",
             }
             lmp = lmp.rename(
-                columns={key: value for key, value in rename_map.items() if key in lmp.columns}
+                columns={k: v for k, v in rename_map.items() if k in lmp.columns}
             )
 
+            # Defensive: if duplicates somehow survived, keep first
+            if lmp.columns.duplicated().any():
+                lmp = lmp.loc[:, ~lmp.columns.duplicated()]
+
             keep = [
-                column
-                for column in [
+                c
+                for c in [
                     "iso",
                     "time",
                     "location",
@@ -439,10 +489,11 @@ def fetch_iso_lmp(
                     "congestion",
                     "loss",
                 ]
-                if column in lmp.columns
+                if c in lmp.columns
             ]
             lmp = lmp[keep]
 
+            # Filter to zone/hub locations only (skip thousands of nodes)
             if "location_type" in lmp.columns:
                 mask = (
                     lmp["location_type"]
@@ -456,10 +507,11 @@ def fetch_iso_lmp(
                 if mask.any():
                     lmp = lmp[mask]
 
-            lmp["time"] = pd.to_datetime(lmp["time"])
-            for column in ["lmp", "energy", "congestion", "loss"]:
-                if column in lmp.columns:
-                    lmp[column] = pd.to_numeric(lmp[column], errors="coerce")
+            lmp["time"] = pd.to_datetime(lmp["time"], utc=True, errors="coerce")
+            lmp = lmp.dropna(subset=["time"])
+            for col in ["lmp", "energy", "congestion", "loss"]:
+                if col in lmp.columns:
+                    lmp[col] = pd.to_numeric(lmp[col], errors="coerce")
 
             print(
                 f"    → {iso_name}: {len(lmp)} hourly LMP records "
@@ -593,7 +645,10 @@ def load_lbnl_queue(
 
     if "type_clean" in df.columns:
         df["type_clean"] = (
-            df["type_clean"].astype(str).str.replace("\u00ac\u2020", " ", regex=False).str.strip()
+            df["type_clean"]
+            .astype(str)
+            .str.replace("\u00ac\u2020", " ", regex=False)
+            .str.strip()
         )
 
     df["mw1"] = pd.to_numeric(df["mw1"], errors="coerce")
@@ -609,7 +664,9 @@ def load_lbnl_queue(
                 origin=EXCEL_DATE_ORIGIN,
             )
 
-    print(f"  → LBNL queue: {len(df)} projects ({df['ba'].notna().sum()} matched to a BA)")
+    print(
+        f"  → LBNL queue: {len(df)} projects ({df['ba'].notna().sum()} matched to a BA)"
+    )
     return df
 
 

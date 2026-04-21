@@ -31,7 +31,6 @@ from data_processing import (
 # ==========================================
 st.set_page_config(
     page_title="Grid Intelligence",
-    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -111,12 +110,12 @@ BA_LATLON = {
 NERC_PEAK_START = 14
 NERC_PEAK_END = 20
 
-PAGE_BRIEFING = "📊 Executive Briefing"
-PAGE_ANOMALY = "🚨 Anomaly Detection"
-PAGE_ARBITRAGE = "💰 Arbitrage Signals"
-PAGE_TRANSITION = "🌱 Transition Scoring"
-PAGE_COMPLIANCE = "📋 Compliance Reports"
-PAGE_ABOUT = "📄 About"
+PAGE_BRIEFING = "Executive Briefing"
+PAGE_ANOMALY = "Anomaly Detection"
+PAGE_ARBITRAGE = "Arbitrage Signals"
+PAGE_TRANSITION = "Transition Scoring"
+PAGE_COMPLIANCE = "Compliance Reports"
+PAGE_ABOUT = "About"
 
 PAGES = [
     PAGE_BRIEFING,
@@ -134,10 +133,14 @@ PAGES = [
 def _style(fig, h=440):
     """Apply consistent styling to all Plotly figures."""
     fig.update_layout(
-        font=dict(family="Inter, sans-serif", size=12, color="#1e293b"),
-        margin=dict(l=50, r=20, t=48, b=48),
+        font=dict(
+            family="'IBM Plex Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace",
+            size=12,
+            color="#1f2937",
+        ),
+        margin=dict(l=72, r=36, t=48, b=56),
         hovermode="x unified",
-        hoverlabel=dict(bgcolor="white", font_size=11, bordercolor=C_GRID),
+        hoverlabel=dict(bgcolor="white", font_size=11, bordercolor="#cbd5e1"),
         legend=dict(
             orientation="h",
             yanchor="top",
@@ -153,18 +156,217 @@ def _style(fig, h=440):
     fig.update_xaxes(
         showgrid=True,
         gridwidth=1,
-        gridcolor=C_GRID,
+        gridcolor="#e5e7eb",
         zeroline=False,
         linecolor="#cbd5e1",
+        tickfont=dict(color="#475569"),
+        title_font=dict(color="#334155"),
+        automargin=True,
     )
     fig.update_yaxes(
         showgrid=True,
         gridwidth=1,
-        gridcolor=C_GRID,
+        gridcolor="#e5e7eb",
         zeroline=False,
         linecolor="#cbd5e1",
+        tickfont=dict(color="#475569"),
+        title_font=dict(color="#334155"),
+        automargin=True,
     )
     return fig
+
+
+def _inject_global_styles() -> None:
+    """Apply a clean, light professional UI layer."""
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background:
+                radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 22rem),
+                linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%);
+            color: #1f2937;
+        }
+        .block-container {
+            max-width: 1440px;
+            padding-top: 1.6rem;
+            padding-bottom: 2.4rem;
+        }
+        h1, h2, h3, h4 {
+            font-family: "IBM Plex Mono", "SFMono-Regular", Consolas,
+                "Liberation Mono", monospace !important;
+            color: #0f172a;
+        }
+        .stMarkdown, .stCaption, label, [data-testid="stMetricLabel"],
+        [data-testid="stMetricValue"] {
+            font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif !important;
+            color: #334155;
+        }
+        h1, h2, h3 {
+            letter-spacing: 0.02em;
+        }
+        [data-testid="stSidebar"] {
+            background:
+                radial-gradient(circle at top left, rgba(14, 165, 233, 0.10), transparent 16rem),
+                linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+            border-right: 1px solid #e2e8f0;
+        }
+        [data-testid="stSidebar"] > div:first-child {
+            padding-top: 0.35rem;
+        }
+        [data-testid="stSidebar"] * {
+            font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif !important;
+            color: #334155;
+        }
+        [data-testid="stSidebarCollapseButton"] span,
+        [data-testid="collapsedControl"] span,
+        .material-symbols-rounded,
+        .material-icons {
+            font-family: "Material Symbols Rounded", "Material Icons" !important;
+            font-weight: normal !important;
+            font-style: normal !important;
+        }
+        [data-testid="stSidebar"] .stImage {
+            margin-top: -0.35rem;
+            margin-bottom: 0.35rem;
+            padding-left: 0.15rem;
+            padding-right: 0.15rem;
+        }
+        .sidebar-brand {
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid #dbe4ee;
+            border-radius: 16px;
+            padding: 1rem 1rem 0.95rem 1rem;
+            margin-bottom: 0.9rem;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+        }
+        .sidebar-eyebrow {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.10em;
+            text-transform: uppercase;
+            color: #0369a1;
+            margin-bottom: 0.45rem;
+        }
+        .sidebar-title {
+            font-family: "IBM Plex Mono", "SFMono-Regular", Consolas,
+                "Liberation Mono", monospace !important;
+            font-size: 1.18rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 0.35rem;
+        }
+        .sidebar-copy {
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: #475569;
+        }
+        .sidebar-section {
+            margin: 1rem 0 0.45rem 0;
+            font-size: 0.73rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #64748b;
+        }
+        .sidebar-note {
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid #dbe4ee;
+            border-radius: 14px;
+            padding: 0.85rem 0.95rem;
+            margin-top: 0.9rem;
+            font-size: 0.86rem;
+            line-height: 1.5;
+            color: #475569;
+        }
+        [data-testid="stMetric"] {
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid #dbe4ee;
+            border-radius: 12px;
+            padding: 0.85rem 1rem;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+        }
+        [data-testid="stSidebar"] [data-testid="stSelectbox"],
+        [data-testid="stSidebar"] [data-testid="stSlider"],
+        [data-testid="stSidebar"] [data-testid="stRadio"] {
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid #dbe4ee;
+            border-radius: 14px;
+            padding: 0.35rem 0.45rem 0.15rem 0.45rem;
+            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.03);
+        }
+        [data-testid="stSidebar"] div[data-baseweb="select"] > div {
+            background-color: #ffffff;
+            border-radius: 10px;
+            border-color: #cbd5e1;
+        }
+        [data-testid="stSidebar"] .stSlider [data-baseweb="slider"] {
+            padding-top: 0.2rem;
+        }
+        [data-testid="stSidebar"] label {
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: #334155;
+        }
+        [data-testid="stSidebar"] .stRadio label p,
+        [data-testid="stSidebar"] .stSelectbox label p,
+        [data-testid="stSidebar"] .stSlider label p {
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: #334155;
+        }
+        [data-testid="stSidebar"] hr {
+            margin: 0.8rem 0 0.8rem 0;
+            border: none;
+            border-top: 1px solid #e5e7eb;
+        }
+        .status-panel {
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid #dbe4ee;
+            border-radius: 14px;
+            padding: 0.85rem 0.95rem 0.45rem 0.95rem;
+            min-height: 100%;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+        }
+        .status-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.75rem;
+            font-size: 0.9rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .status-count {
+            border: 1px solid currentColor;
+            border-radius: 999px;
+            padding: 0.05rem 0.55rem;
+            font-size: 0.76rem;
+        }
+        .status-item {
+            border-top: 1px solid #e5e7eb;
+            padding: 0.65rem 0 0.7rem 0;
+            line-height: 1.5;
+            font-size: 0.83rem;
+            color: #334155;
+        }
+        .status-item:first-of-type {
+            border-top: none;
+            padding-top: 0;
+        }
+        .status-empty {
+            color: #94a3b8;
+            font-size: 0.82rem;
+            padding-bottom: 0.25rem;
+        }
+        .status-critical { color: #b91c1c; border-top: 3px solid #dc2626; }
+        .status-warning { color: #b45309; border-top: 3px solid #d97706; }
+        .status-normal { color: #047857; border-top: 3px solid #059669; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _cross_ref(text: str) -> None:
@@ -242,6 +444,252 @@ def _status_pill(status: str) -> str:
     )
 
 
+def _render_status_panel(title: str, count: int, tone: str, rows: list[str]) -> None:
+    """Render compact professional status panels without emoji."""
+    body = "".join([f"<div class='status-item'>{row}</div>" for row in rows])
+    if not body:
+        body = "<div class='status-empty'>None.</div>"
+    st.markdown(
+        (
+            f"<div class='status-panel status-{tone}'>"
+            f"<div class='status-panel-header'>"
+            f"<span>{title}</span><span class='status-count'>{count}</span>"
+            f"</div>{body}</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _init_nav_state() -> None:
+    """Initialize lightweight shared navigation state."""
+    defaults = {
+        "nav_page": PAGE_BRIEFING,
+        "nav_target_ba": MAJOR_BA[0],
+        "nav_route_fromba": None,
+        "nav_route_toba": None,
+        "nav_target_iso": None,
+        "nav_target_lmp_location": None,
+        "nav_focus_section": "Overview",
+        "nav_status_message": None,
+        "nav_sync_sidebar": False,
+        "sidebar_page": PAGE_BRIEFING,
+        "sidebar_ba": MAJOR_BA[0],
+    }
+    for key, value in defaults.items():
+        st.session_state.setdefault(key, value)
+
+
+def _sync_sidebar_state() -> None:
+    """Sync sidebar widget defaults from navigation state before widget creation."""
+    if st.session_state.get("nav_sync_sidebar"):
+        st.session_state["sidebar_page"] = st.session_state.get("nav_page", PAGE_BRIEFING)
+        st.session_state["sidebar_ba"] = st.session_state.get("nav_target_ba", MAJOR_BA[0])
+        st.session_state["nav_sync_sidebar"] = False
+
+
+def _sync_route_state(route_options: list[str]) -> None:
+    """Sync route selector widget state from navigation state before widget creation."""
+    candidate = None
+    fromba = st.session_state.get("nav_route_fromba")
+    toba = st.session_state.get("nav_route_toba")
+    if fromba and toba:
+        nav_candidate = f"{fromba} → {toba}"
+        if nav_candidate in route_options:
+            candidate = nav_candidate
+    if candidate is None and route_options:
+        candidate = route_options[0]
+    if candidate is not None:
+        st.session_state["route_select"] = candidate
+
+
+def _sync_lmp_state(iso_options: list[str], location_options: list[str]) -> None:
+    """Sync LMP selector widget state from navigation state before widget creation."""
+    pref_iso = st.session_state.get("nav_target_iso")
+    if pref_iso in iso_options:
+        st.session_state["lmp_iso"] = pref_iso
+    elif iso_options and "lmp_iso" not in st.session_state:
+        st.session_state["lmp_iso"] = iso_options[0]
+
+    pref_loc = st.session_state.get("nav_target_lmp_location")
+    if pref_loc in location_options:
+        st.session_state["lmp_loc"] = pref_loc
+    elif location_options and "lmp_loc" not in st.session_state:
+        st.session_state["lmp_loc"] = location_options[0]
+
+
+def _set_nav(  # noqa: PLR0913
+    page: str | None = None,
+    ba: str | None = None,
+    fromba: str | None = None,
+    toba: str | None = None,
+    iso: str | None = None,
+    location: str | None = None,
+    focus: str | None = None,
+    status_message: str | None = None,
+    sync_sidebar: bool = True,
+) -> None:
+    """Update shared navigation state."""
+    if page is not None:
+        st.session_state["nav_page"] = page
+    if ba is not None:
+        st.session_state["nav_target_ba"] = ba
+    if fromba is not None:
+        st.session_state["nav_route_fromba"] = fromba
+    if toba is not None:
+        st.session_state["nav_route_toba"] = toba
+    if iso is not None:
+        st.session_state["nav_target_iso"] = iso
+    if location is not None:
+        st.session_state["nav_target_lmp_location"] = location
+    if focus is not None:
+        st.session_state["nav_focus_section"] = focus
+    if status_message is not None:
+        st.session_state["nav_status_message"] = status_message
+    if sync_sidebar and (page is not None or ba is not None):
+        st.session_state["nav_sync_sidebar"] = True
+
+
+def _nav_button(label: str, key: str, **nav_kwargs) -> None:
+    """Small wrapper for navigation buttons."""
+    if st.button(label, key=key, use_container_width=True):
+        _set_nav(**nav_kwargs)
+        st.rerun()
+
+
+def _format_context_summary() -> str:
+    """Format the current cross-page investigation context."""
+    bits = [f"BA: <b>{st.session_state.get('nav_target_ba')}</b>"]
+    focus = st.session_state.get("nav_focus_section")
+    if focus:
+        bits.append(f"Focus: <b>{focus}</b>")
+    fromba = st.session_state.get("nav_route_fromba")
+    toba = st.session_state.get("nav_route_toba")
+    if fromba and toba:
+        bits.append(f"Route: <b>{fromba} → {toba}</b>")
+    iso = st.session_state.get("nav_target_iso")
+    location = st.session_state.get("nav_target_lmp_location")
+    if iso:
+        loc_text = f" / <b>{location}</b>" if location else ""
+        bits.append(f"LMP: <b>{iso}</b>{loc_text}")
+    return " | ".join(bits)
+
+
+def _on_sidebar_page_change() -> None:
+    """Update navigation when the sidebar page selector changes."""
+    _set_nav(
+        page=st.session_state.get("sidebar_page"),
+        ba=st.session_state.get("sidebar_ba"),
+        sync_sidebar=False,
+    )
+
+
+def _on_sidebar_ba_change() -> None:
+    """Update navigation when the sidebar BA selector changes."""
+    _set_nav(
+        page=st.session_state.get("sidebar_page"),
+        ba=st.session_state.get("sidebar_ba"),
+        sync_sidebar=False,
+    )
+
+
+def _render_context_bar(page_name: str) -> None:
+    """Show the current investigation context and quick jumps."""
+    if st.session_state.get("nav_status_message"):
+        st.info(st.session_state["nav_status_message"])
+        st.session_state["nav_status_message"] = None
+
+    st.markdown(
+        (
+            "<div style='background:rgba(255,255,255,0.88);border:1px solid #dbe4ee;"
+            "border-radius:14px;padding:0.75rem 0.95rem;margin:0.35rem 0 1rem 0;'>"
+            "<div style='font-size:0.72rem;font-weight:700;letter-spacing:0.08em;"
+            "text-transform:uppercase;color:#64748b;margin-bottom:0.35rem;'>"
+            f"Investigation Context | {page_name}</div>"
+            f"<div style='font-size:0.92rem;color:#334155;'>{_format_context_summary()}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        _nav_button(
+            "Executive Briefing",
+            f"context-{page_name}-brief",
+            page=PAGE_BRIEFING,
+            ba=st.session_state.get("nav_target_ba"),
+        )
+    with c2:
+        _nav_button(
+            "Anomaly Detection",
+            f"context-{page_name}-anom",
+            page=PAGE_ANOMALY,
+            ba=st.session_state.get("nav_target_ba"),
+        )
+    with c3:
+        _nav_button(
+            "Arbitrage Signals",
+            f"context-{page_name}-arb",
+            page=PAGE_ARBITRAGE,
+            ba=st.session_state.get("nav_target_ba"),
+        )
+    with c4:
+        _nav_button(
+            "Transition Scoring",
+            f"context-{page_name}-transition",
+            page=PAGE_TRANSITION,
+            ba=st.session_state.get("nav_target_ba"),
+        )
+    with c5:
+        _nav_button(
+            "Compliance Reports",
+            f"context-{page_name}-comp",
+            page=PAGE_COMPLIANCE,
+            ba=st.session_state.get("nav_target_ba"),
+        )
+
+
+def _transition_strength_summary(row: pd.Series) -> str:
+    """Return a plain-language strongest/weakest factor summary."""
+    factors = {
+        "Demand Growth": float(row.get("demand_growth_score", 0) or 0),
+        "Renewable Headroom": float(row.get("renewable_headroom_score", 0) or 0),
+        "Import Dependence": float(row.get("import_dependence_score", 0) or 0),
+        "Fossil Transition": float(row.get("fossil_transition_score", 0) or 0),
+        "Queue Activity": float(row.get("queue_active_score", 0) or 0),
+        "Queue Completion": float(row.get("queue_completion_score", 0) or 0),
+    }
+    strongest = max(factors, key=factors.get)
+    weakest = min(factors, key=factors.get)
+    return f"Strongest factor: {strongest}. Weakest factor: {weakest}."
+
+
+def _route_signal_summary(row: pd.Series) -> str:
+    """Return a short interpretation for an arbitrage route."""
+    direction = "export-led" if float(row.get("peak_avg_flow", 0) or 0) > 0 else "import-led"
+    return (
+        f"This route stands out because it combines {direction} peak-hour flow "
+        f"with a signal score of {float(row.get('signal_score', 0) or 0):.1f}. "
+        "Higher scores imply larger and steadier directional movement."
+    )
+
+
+def _anomaly_summary(row: pd.Series) -> str:
+    """Return plain-language anomaly interpretation."""
+    status = row.get("status", "NORMAL")
+    ba = row.get("ba", "this BA")
+    if status == "RED":
+        return (
+            f"{ba} is critical because at least 3 of the last 6 hours cleared its P95 threshold. "
+            "This suggests a sustained forecasting miss rather than one noisy hour."
+        )
+    if status == "YELLOW":
+        return (
+            f"{ba} is on warning because recent error is persistently above its P90 band. "
+            "This is elevated but not yet a full control breach."
+        )
+    return f"{ba} is within its expected forecast-error range."
+
+
 # ==========================================
 # Auth & data loading
 # ==========================================
@@ -260,10 +708,25 @@ def _get_creds():
 _creds = _get_creds()
 
 
-@st.cache_resource(ttl=3600, show_spinner="⚡ Loading market data...")
+@st.cache_resource(ttl=3600, show_spinner="Loading market data...")
 def _load_all() -> dict:
     """One-shot load of all BigQuery tables into memory."""
+    from google.api_core.exceptions import Forbidden
     from google.cloud import bigquery
+
+    empty = {
+        "demand": pd.DataFrame(),
+        "interchange": pd.DataFrame(),
+        "fuel": pd.DataFrame(),
+        "ng_price": pd.DataFrame(),
+        "weather": pd.DataFrame(),
+        "ranking": pd.DataFrame(),
+        "queue_ba": pd.DataFrame(),
+        "queue_type": pd.DataFrame(),
+        "nrel": pd.DataFrame(),
+        "lmp": pd.DataFrame(),
+        "_load_error": None,
+    }
 
     cl = bigquery.Client(project=GCP_PROJECT, credentials=_creds)
 
@@ -277,85 +740,132 @@ def _load_all() -> dict:
         except Exception:
             return pd.DataFrame()
 
-    d: dict = {}
+    d: dict = empty.copy()
 
-    df = q(
-        "SELECT period, respondent, `type-name`, "
-        "CAST(value AS FLOAT64) AS value "
-        f"FROM `{_DS}.hourly_demand`"
-    )
-    df["period"] = pd.to_datetime(df["period"])
-    d["demand"] = df
+    try:
+        df = q(
+            "SELECT period, respondent, `type-name`, "
+            "CAST(value AS FLOAT64) AS value "
+            f"FROM `{_DS}.hourly_demand`"
+        )
+        df["period"] = pd.to_datetime(df["period"])
+        d["demand"] = df
 
-    df = q(
-        "SELECT period, fromba, toba, "
-        "CAST(value AS FLOAT64) AS value "
-        f"FROM `{_DS}.hourly_interchange`"
-    )
-    df["period"] = pd.to_datetime(df["period"])
-    d["interchange"] = df
+        df = q(
+            "SELECT period, fromba, toba, "
+            "CAST(value AS FLOAT64) AS value "
+            f"FROM `{_DS}.hourly_interchange`"
+        )
+        df["period"] = pd.to_datetime(df["period"])
+        d["interchange"] = df
 
-    df = q(
-        "SELECT period, respondent, fueltype, "
-        "CAST(value AS FLOAT64) AS value "
-        f"FROM `{_DS}.hourly_fuel_type`"
-    )
-    df["period"] = pd.to_datetime(df["period"])
-    d["fuel"] = df
+        df = q(
+            "SELECT period, respondent, fueltype, "
+            "CAST(value AS FLOAT64) AS value "
+            f"FROM `{_DS}.hourly_fuel_type`"
+        )
+        df["period"] = pd.to_datetime(df["period"])
+        d["fuel"] = df
 
-    df = q(f"SELECT date, CAST(ng_price AS FLOAT64) AS ng_price FROM `{_DS}.daily_ng_price`")
-    df["date"] = pd.to_datetime(df["date"])
-    d["ng_price"] = df
+        df = q(f"SELECT date, CAST(ng_price AS FLOAT64) AS ng_price FROM `{_DS}.daily_ng_price`")
+        df["date"] = pd.to_datetime(df["date"])
+        d["ng_price"] = df
 
-    d["weather"] = q_safe(
-        "SELECT date, ba, "
-        "CAST(avg_temp AS FLOAT64) AS avg_temp, "
-        "CAST(max_temp AS FLOAT64) AS max_temp, "
-        "CAST(min_temp AS FLOAT64) AS min_temp "
-        f"FROM `{_DS}.daily_weather`"
-    )
-    if not d["weather"].empty:
-        d["weather"]["date"] = pd.to_datetime(d["weather"]["date"])
+        d["weather"] = q_safe(
+            "SELECT date, ba, "
+            "CAST(avg_temp AS FLOAT64) AS avg_temp, "
+            "CAST(max_temp AS FLOAT64) AS max_temp, "
+            "CAST(min_temp AS FLOAT64) AS min_temp "
+            f"FROM `{_DS}.daily_weather`"
+        )
+        if not d["weather"].empty:
+            d["weather"]["date"] = pd.to_datetime(d["weather"]["date"])
 
-    d["ranking"] = q_safe(f"SELECT * FROM `{_DS}.ba_mape_ranking` ORDER BY mape")
+        d["ranking"] = q_safe(f"SELECT * FROM `{_DS}.ba_mape_ranking` ORDER BY mape")
 
-    d["queue_ba"] = q_safe(f"SELECT * FROM `{_DS}.queue_ba_summary`")
-    d["queue_type"] = q_safe(f"SELECT * FROM `{_DS}.queue_type_summary`")
-    d["nrel"] = q_safe(f"SELECT * FROM `{_DS}.nrel_resource_locations`")
+        d["queue_ba"] = q_safe(f"SELECT * FROM `{_DS}.queue_ba_summary`")
+        d["queue_type"] = q_safe(f"SELECT * FROM `{_DS}.queue_type_summary`")
+        d["nrel"] = q_safe(f"SELECT * FROM `{_DS}.nrel_resource_locations`")
 
-    d["lmp"] = q_safe(
-        "SELECT iso, time, location, location_type, "
-        "CAST(lmp AS FLOAT64) AS lmp, "
-        "CAST(congestion AS FLOAT64) AS congestion "
-        f"FROM `{_DS}.iso_hourly_lmp`"
-    )
-    if not d["lmp"].empty:
-        d["lmp"]["time"] = pd.to_datetime(d["lmp"]["time"])
+        d["lmp"] = q_safe(
+            "SELECT iso, time, location, location_type, "
+            "CAST(lmp AS FLOAT64) AS lmp, "
+            "CAST(congestion AS FLOAT64) AS congestion "
+            f"FROM `{_DS}.iso_hourly_lmp`"
+        )
+        if not d["lmp"].empty:
+            d["lmp"]["time"] = pd.to_datetime(d["lmp"]["time"])
+    except Forbidden:
+        d["_load_error"] = (
+            f"BigQuery access denied for project `{GCP_PROJECT}`. "
+            "The current credentials do not have `bigquery.jobs.create`."
+        )
+    except Exception as exc:
+        d["_load_error"] = (
+            f"Failed to load dashboard data from BigQuery: {type(exc).__name__}: {exc}"
+        )
 
     return d
 
 
 _D = _load_all()
+_inject_global_styles()
+_init_nav_state()
+_sync_sidebar_state()
+
+if _D.get("_load_error"):
+    st.error(_D["_load_error"])
+    st.info(
+        "To run this app, use credentials with at least `bigquery.jobs.create` "
+        "and dataset read access, or switch the app to a local/mock data source."
+    )
+    st.stop()
 
 
 # ==========================================
 # Sidebar
 # ==========================================
-st.sidebar.title("⚡ Grid Intelligence")
-st.sidebar.caption("Power market intelligence — built on public data")
-st.sidebar.markdown("---")
-page = st.sidebar.radio("Module", PAGES)
-st.sidebar.markdown("---")
+st.sidebar.image("assets/SIPA_logo.png", use_container_width=True)
+st.sidebar.markdown(
+    """
+    <div class="sidebar-brand">
+        <div class="sidebar-eyebrow">Power Market Intelligence</div>
+        <div class="sidebar-title">Grid Intelligence</div>
+        <div class="sidebar-copy">
+            Monitor demand, interchange, transition, and anomaly signals
+            across major balancing authorities.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown('<div class="sidebar-section">Module</div>', unsafe_allow_html=True)
+page = st.sidebar.radio(
+    "Module",
+    PAGES,
+    key="sidebar_page",
+    label_visibility="collapsed",
+    on_change=_on_sidebar_page_change,
+)
+st.sidebar.markdown('<div class="sidebar-section">Filters</div>', unsafe_allow_html=True)
 sel_ba = st.sidebar.selectbox(
     "Balancing Authority",
     MAJOR_BA,
+    key="sidebar_ba",
     format_func=lambda x: f"{x} — {BA_NAMES[x]}",
+    on_change=_on_sidebar_ba_change,
 )
 days = st.sidebar.slider("Time window (days)", 1, 30, 7)
-st.sidebar.markdown("---")
-st.sidebar.caption(
-    "**Data freshness**: ETL refreshes daily at 09:00 UTC via GitHub Actions. "
-    "Dashboard cache TTL = 1h."
+_set_nav(page=page, ba=sel_ba, sync_sidebar=False)
+st.sidebar.markdown(
+    """
+    <div class="sidebar-note">
+        <strong>Data freshness</strong><br/>
+        ETL refreshes daily at 09:00 UTC.<br/>
+        Dashboard cache TTL: 1 hour.
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 
@@ -391,10 +901,11 @@ _S = _compute_signals()
 # ===================================================================
 if page == PAGE_BRIEFING:
     t0 = time.time()
-    st.title("📊 Executive Briefing")
+    st.title("Executive Briefing")
     _cross_ref(
         f"Single-pane snapshot of <b>{sel_ba}</b>. Drill into modules below for full analysis."
     )
+    _render_context_bar(PAGE_BRIEFING)
 
     briefing = build_executive_briefing(
         ba=sel_ba,
@@ -454,6 +965,121 @@ if page == PAGE_BRIEFING:
         else:
             st.metric("Renewable Share", "—")
 
+    k1x, k2x, k3x, k4x = st.columns(4)
+    with k1x, st.expander("Interpret Forecast Status", expanded=False):
+        status = briefing.get("anomaly_status", "NO_DATA")
+        st.write(
+            "RED means 3 of the last 6 hours exceeded P95. "
+            "YELLOW means 3 exceeded P90. "
+            "NORMAL means recent error stayed inside control bands."
+        )
+        if briefing.get("latest_error_mwh") is not None:
+            st.caption(f"Latest absolute error: {briefing['latest_error_mwh']:,.0f} MWh.")
+        b1, b2 = st.columns(2)
+        with b1:
+            _nav_button(
+                "Open anomaly diagnostics",
+                "brief-forecast-anomaly",
+                page=PAGE_ANOMALY,
+                ba=sel_ba,
+                focus="Forecast Status",
+                status_message=f"Opened anomaly diagnostics for {sel_ba}.",
+            )
+        with b2:
+            _nav_button(
+                "Open compliance context",
+                "brief-forecast-comp",
+                page=PAGE_COMPLIANCE,
+                ba=sel_ba,
+                focus="Forecast Accuracy",
+            )
+    with k2x, st.expander("Inspect Latest Demand", expanded=False):
+        demand_series = _D["demand"]
+        demand_series = demand_series[
+            (demand_series["respondent"] == sel_ba) & (demand_series["type-name"] == "Demand")
+        ]
+        if not demand_series.empty:
+            mini = demand_series.sort_values("period").tail(min(days * 24, 72))
+            fig_mini = go.Figure(
+                go.Scatter(
+                    x=mini["period"],
+                    y=mini["value"],
+                    mode="lines",
+                    line=dict(color=C_PRIMARY, width=1.5),
+                )
+            )
+            fig_mini.update_layout(margin=dict(l=8, r=8, t=10, b=24), height=160)
+            _style(fig_mini, h=160)
+            st.plotly_chart(fig_mini, use_container_width=True)
+        b1, b2 = st.columns(2)
+        with b1:
+            _nav_button(
+                "Open full demand trend",
+                "brief-demand-trend",
+                page=PAGE_COMPLIANCE,
+                ba=sel_ba,
+                focus="Demand",
+            )
+        with b2:
+            _nav_button(
+                "See forecast error chart",
+                "brief-demand-error",
+                page=PAGE_ANOMALY,
+                ba=sel_ba,
+                focus="Error Control Chart",
+            )
+    with k3x, st.expander("Interpret Transition Score", expanded=False):
+        ba_trans = _S["transition"][_S["transition"]["ba"] == sel_ba]
+        if not ba_trans.empty:
+            row = ba_trans.iloc[0]
+            st.write(_transition_strength_summary(row))
+        st.write(
+            "Rank reflects this BA's relative clean-energy opportunity across the tracked set."
+        )
+        b1, b2 = st.columns(2)
+        with b1:
+            _nav_button(
+                "Open factor breakdown",
+                "brief-transition-factors",
+                page=PAGE_TRANSITION,
+                ba=sel_ba,
+                focus="Six-Factor Profile",
+            )
+        with b2:
+            _nav_button(
+                "Open queue details",
+                "brief-transition-queue",
+                page=PAGE_TRANSITION,
+                ba=sel_ba,
+                focus="Interconnection Queue",
+            )
+    with k4x, st.expander("Interpret Renewable Share", expanded=False):
+        st.write(
+            "Renewable Share is derived from generation mix using "
+            "SUN, WND, and WAT fuel categories."
+        )
+        st.write(
+            "Lower renewable share can imply more headroom; "
+            "higher share shows an already advanced mix."
+        )
+        b1, b2 = st.columns(2)
+        with b1:
+            _nav_button(
+                "Open factor breakdown",
+                "brief-renew-transition",
+                page=PAGE_TRANSITION,
+                ba=sel_ba,
+                focus="Renewable Headroom",
+            )
+        with b2:
+            _nav_button(
+                "Open compliance mix",
+                "brief-renew-compliance",
+                page=PAGE_COMPLIANCE,
+                ba=sel_ba,
+                focus="Generation Mix",
+            )
+
     # LMP context line — only renders when this BA maps to a covered ISO
     spikes = briefing.get("lmp_spike_locations")
     negs = briefing.get("lmp_negative_locations")
@@ -468,9 +1094,16 @@ if page == PAGE_BRIEFING:
             bits.append(f"<span style='color:{C_GREEN};'>no LMP anomalies</span>")
         st.markdown(
             f"<div style='color:{C_MUTED};font-size:0.88rem;margin-top:0.5rem;'>"
-            f"⚡ <b>{iso_label} LMP:</b> {' · '.join(bits)} in last 6h "
-            f"(see Anomaly Detection)</div>",
+            f"⚡ <b>{iso_label} LMP:</b> {' · '.join(bits)} in last 6h</div>",
             unsafe_allow_html=True,
+        )
+        _nav_button(
+            "Open LMP anomaly diagnostics",
+            "brief-lmp-open",
+            page=PAGE_ANOMALY,
+            ba=sel_ba,
+            iso=iso_label,
+            focus="LMP Price Anomalies",
         )
 
     _section_divider()
@@ -534,7 +1167,23 @@ if page == PAGE_BRIEFING:
                 "of <code>abs_error</code> computed over the full 3-month "
                 "history for this BA."
             )
-        st.caption("→ Full control chart and cross-BA comparison in **Anomaly Detection**")
+        cta1, cta2 = st.columns(2)
+        with cta1:
+            _nav_button(
+                "Open anomaly diagnostics",
+                "brief-forecast-open-anomaly",
+                page=PAGE_ANOMALY,
+                ba=sel_ba,
+                focus="Error Control Chart",
+            )
+        with cta2:
+            _nav_button(
+                "Open compliance forecast section",
+                "brief-forecast-open-comp",
+                page=PAGE_COMPLIANCE,
+                ba=sel_ba,
+                focus="Forecast Accuracy",
+            )
 
     with col_b:
         st.subheader(
@@ -581,7 +1230,30 @@ if page == PAGE_BRIEFING:
                 "peak-hour absolute flow) and <b>consistency</b> (40%, "
                 "<code>1 − volatility/max_volatility</code>), scaled to 0–100."
             )
-        st.caption("→ Heatmap and route profiles in **Arbitrage Signals**")
+        cta1, cta2 = st.columns(2)
+        with cta1:
+            top_route = ba_arb.iloc[0] if not ba_arb.empty else None
+            _nav_button(
+                "Open arbitrage module",
+                "brief-arb-open",
+                page=PAGE_ARBITRAGE,
+                ba=sel_ba,
+                fromba=top_route["fromba"] if top_route is not None else None,
+                toba=top_route["toba"] if top_route is not None else None,
+                focus="Top Arbitrage Routes",
+            )
+        with cta2:
+            if not ba_arb.empty:
+                top_route = ba_arb.iloc[0]
+                _nav_button(
+                    "Inspect top route",
+                    "brief-arb-route",
+                    page=PAGE_ARBITRAGE,
+                    ba=sel_ba,
+                    fromba=top_route["fromba"],
+                    toba=top_route["toba"],
+                    focus="Route Profile",
+                )
 
     _section_divider()
 
@@ -649,7 +1321,23 @@ if page == PAGE_BRIEFING:
                 "interconnection queue (Berkeley Lab, thru 2024). Full derivation "
                 "of each axis is documented in the Transition Scoring module."
             )
-        st.caption("→ Composite ranking and queue detail in **Transition Scoring**")
+        cta1, cta2 = st.columns(2)
+        with cta1:
+            _nav_button(
+                "Open factor breakdown",
+                "brief-trans-open",
+                page=PAGE_TRANSITION,
+                ba=sel_ba,
+                focus="Six-Factor Profile",
+            )
+        with cta2:
+            _nav_button(
+                "Open queue detail",
+                "brief-trans-queue",
+                page=PAGE_TRANSITION,
+                ba=sel_ba,
+                focus="Interconnection Queue",
+            )
 
     with col_d:
         st.subheader(
@@ -671,22 +1359,26 @@ if page == PAGE_BRIEFING:
             qb = get_queue_breakdown_for_ba(_D["queue_type"], sel_ba)
             if not qb.empty:
                 qb = qb.head(8).copy()
+                max_active_mw = qb["active_mw"].max()
                 fig = go.Figure(
                     go.Bar(
                         x=qb["active_mw"],
                         y=qb["resource_type"],
                         orientation="h",
                         marker_color=C_GREEN,
-                        text=qb["active_mw"].round(0).astype(int),
+                        text=qb["active_mw"].round(0),
+                        texttemplate="%{text:,.0f} MW",
                         textposition="outside",
+                        cliponaxis=False,
                     )
                 )
                 fig.update_layout(
                     xaxis_title="Active MW",
                     yaxis_title="",
                     yaxis=dict(categoryorder="total ascending"),
+                    xaxis=dict(range=[0, max_active_mw * 1.18 if max_active_mw > 0 else 1]),
                 )
-                _style(fig, h=240)
+                _style(fig, h=300)
                 st.plotly_chart(fig, use_container_width=True)
                 _source(
                     "LBNL Queued Up report "
@@ -696,7 +1388,13 @@ if page == PAGE_BRIEFING:
                 )
             else:
                 st.caption("No queue breakdown available for this BA.")
-        st.caption("→ Resource-type breakdown details in **Transition Scoring**")
+        _nav_button(
+            "Open full queue details",
+            "brief-queue-open",
+            page=PAGE_TRANSITION,
+            ba=sel_ba,
+            focus="Interconnection Queue",
+        )
 
     _section_divider()
 
@@ -742,7 +1440,13 @@ if page == PAGE_BRIEFING:
         "typically sits in the 1–3% range; values above 5% signal either "
         "forecasting-model issues or unusual weather/load patterns."
     )
-    st.caption("→ Full FERC-style sections in **Compliance Reports**")
+    _nav_button(
+        "Open full compliance report",
+        "brief-open-compliance",
+        page=PAGE_COMPLIANCE,
+        ba=sel_ba,
+        focus="Cross-Module Signals",
+    )
 
     st.caption(f"Briefing assembled in {time.time() - t0:.2f}s")
 
@@ -752,11 +1456,12 @@ if page == PAGE_BRIEFING:
 # ===================================================================
 elif page == PAGE_ANOMALY:
     t0 = time.time()
-    st.title("🚨 Anomaly Detection")
+    st.title("Anomaly Detection")
     _cross_ref(
         "Flagged BAs feed into <b>Compliance Reports §5</b> and the "
         "<b>Executive Briefing</b> headline status."
     )
+    _render_context_bar(PAGE_ANOMALY)
     st.markdown(
         "Monitors day-ahead forecast errors across all balancing authorities and "
         "flags regions where recent errors persistently exceed historical norms.",
@@ -777,37 +1482,129 @@ elif page == PAGE_ANOMALY:
 
         col_r, col_y, col_g = st.columns(3)
         with col_r:
-            st.markdown(f"#### 🔴 Critical ({len(red)})")
-            for _, r in red.iterrows():
-                st.error(
-                    f"**{r['ba']}** — {BA_NAMES.get(r['ba'], '')}  \n"
-                    f"Error: **{r['latest_error']:,.0f}** MWh"
-                    f" · 6h avg: {r['recent_mean_error']:,.0f}"
-                    f" · P95: {r['p95_threshold']:,.0f}",
-                    icon="🔴",
-                )
-            if red.empty:
-                st.caption("None.")
+            _render_status_panel(
+                "Critical",
+                len(red),
+                "critical",
+                [
+                    (
+                        f"<b>{r['ba']}</b> - {BA_NAMES.get(r['ba'], '')}<br/>"
+                        f"Latest: <b>{r['latest_error']:,.0f}</b> MWh | "
+                        f"6h avg: {r['recent_mean_error']:,.0f} | "
+                        f"P95: {r['p95_threshold']:,.0f}"
+                    )
+                    for _, r in red.iterrows()
+                ],
+            )
         with col_y:
-            st.markdown(f"#### 🟡 Warning ({len(yel)})")
-            for _, r in yel.iterrows():
-                st.warning(
-                    f"**{r['ba']}** — {BA_NAMES.get(r['ba'], '')}  \n"
-                    f"Error: **{r['latest_error']:,.0f}** MWh"
-                    f" · 6h avg: {r['recent_mean_error']:,.0f}"
-                    f" · P90: {r['p90_threshold']:,.0f}",
-                    icon="🟡",
-                )
-            if yel.empty:
-                st.caption("None.")
+            _render_status_panel(
+                "Warning",
+                len(yel),
+                "warning",
+                [
+                    (
+                        f"<b>{r['ba']}</b> - {BA_NAMES.get(r['ba'], '')}<br/>"
+                        f"Latest: <b>{r['latest_error']:,.0f}</b> MWh | "
+                        f"6h avg: {r['recent_mean_error']:,.0f} | "
+                        f"P90: {r['p90_threshold']:,.0f}"
+                    )
+                    for _, r in yel.iterrows()
+                ],
+            )
         with col_g:
-            st.markdown(f"#### 🟢 Normal ({len(grn)})")
-            for _, r in grn.iterrows():
-                st.success(
-                    f"**{r['ba']}** — {BA_NAMES.get(r['ba'], '')}  \n"
-                    f"Error: {r['latest_error']:,.0f} MWh · Within normal range",
-                    icon="🟢",
-                )
+            _render_status_panel(
+                "Normal",
+                len(grn),
+                "normal",
+                [
+                    (
+                        f"<b>{r['ba']}</b> - {BA_NAMES.get(r['ba'], '')}<br/>"
+                        f"Latest: {r['latest_error']:,.0f} MWh | Within normal range"
+                    )
+                    for _, r in grn.iterrows()
+                ],
+            )
+
+        if not red.empty:
+            with st.expander("Critical BA interpretation and actions", expanded=False):
+                for _, r in red.iterrows():
+                    st.markdown(f"**{r['ba']} - {BA_NAMES.get(r['ba'], '')}**")
+                    st.write(_anomaly_summary(r))
+                    st.caption(
+                        "Severity: High. This often implies either model misspecification, "
+                        "unusual weather/load, "
+                        "or an abrupt operating change."
+                    )
+                    b1, b2, b3, b4 = st.columns(4)
+                    with b1:
+                        _nav_button(
+                            "Investigate this BA",
+                            f"anom-red-investigate-{r['ba']}",
+                            page=PAGE_ANOMALY,
+                            ba=r["ba"],
+                            focus="Error Control Chart",
+                            status_message=f"Investigating anomaly diagnostics for {r['ba']}.",
+                        )
+                    with b2:
+                        _nav_button(
+                            "Set as current BA",
+                            f"anom-red-set-{r['ba']}",
+                            ba=r["ba"],
+                            focus="Forecast Status",
+                        )
+                    with b3:
+                        _nav_button(
+                            "Open compliance report",
+                            f"anom-red-comp-{r['ba']}",
+                            page=PAGE_COMPLIANCE,
+                            ba=r["ba"],
+                            focus="Forecast Accuracy",
+                        )
+                    with b4:
+                        _nav_button(
+                            "Open briefing",
+                            f"anom-red-brief-{r['ba']}",
+                            page=PAGE_BRIEFING,
+                            ba=r["ba"],
+                            focus="Forecast Status",
+                        )
+                    st.markdown("---")
+
+        if not yel.empty:
+            with st.expander("Warning BA interpretation and actions", expanded=False):
+                for _, r in yel.iterrows():
+                    st.markdown(f"**{r['ba']} - {BA_NAMES.get(r['ba'], '')}**")
+                    st.write(_anomaly_summary(r))
+                    st.caption(
+                        "Severity: Moderate. This is a watch-list condition "
+                        "that may escalate if the same pattern persists."
+                    )
+                    b1, b2, b3 = st.columns(3)
+                    with b1:
+                        _nav_button(
+                            "Investigate this BA",
+                            f"anom-yel-investigate-{r['ba']}",
+                            page=PAGE_ANOMALY,
+                            ba=r["ba"],
+                            focus="Error Control Chart",
+                        )
+                    with b2:
+                        _nav_button(
+                            "Open compliance report",
+                            f"anom-yel-comp-{r['ba']}",
+                            page=PAGE_COMPLIANCE,
+                            ba=r["ba"],
+                            focus="Forecast Accuracy",
+                        )
+                    with b3:
+                        _nav_button(
+                            "Open Executive Briefing",
+                            f"anom-yel-brief-{r['ba']}",
+                            page=PAGE_BRIEFING,
+                            ba=r["ba"],
+                            focus="Forecast Status",
+                        )
+                    st.markdown("---")
 
         _section_divider()
 
@@ -897,10 +1694,10 @@ elif page == PAGE_ANOMALY:
         st.subheader(
             "Cross-BA Error Comparison",
             help=(
-                "Kernel-density violin plots comparing the full distribution of "
-                "absolute forecast errors across all 10 tracked BAs. The embedded "
-                "box shows median and IQR; the violin width at each y-value is "
-                "proportional to the density of hours at that error level. "
+                "Horizontal box plots comparing the full distribution of "
+                "absolute forecast errors across all 10 tracked BAs. Each box "
+                "shows the median and interquartile range, with whiskers for "
+                "the broader spread of the series. "
                 "Y-axis is logarithmic because error magnitudes span two to three "
                 "orders of magnitude across BAs (small BAs like BPAT vs. large "
                 "ones like PJM), and linear scale would compress the smaller BAs "
@@ -920,20 +1717,23 @@ elif page == PAGE_ANOMALY:
             err_df = err_df[err_df["abs_error"] > 0]
             # Order BAs by median error so the plot reads top-to-bottom best→worst
             median_order = err_df.groupby("BA")["abs_error"].median().sort_values().index.tolist()
-            fig_v = px.violin(
+            fig_v = px.box(
                 err_df,
                 y="BA",
                 x="abs_error",
-                box=True,
-                points=False,
                 orientation="h",
                 color_discrete_sequence=[C_PRIMARY],
                 labels={"abs_error": "Absolute Error (MWh, log scale)", "BA": ""},
                 category_orders={"BA": median_order},
                 log_x=True,
             )
-            fig_v.update_traces(width=0.85, meanline_visible=True)
-            _style(fig_v, h=560)
+            fig_v.update_traces(
+                width=0.6,
+                marker=dict(size=4, opacity=0.4, color=C_ACCENT),
+                line=dict(width=1.6),
+            )
+            fig_v.update_layout(boxmode="group")
+            _style(fig_v, h=760)
             st.plotly_chart(fig_v, use_container_width=True)
             _source(
                 "EIA Form 930 hourly demand and day-ahead forecast across all 10 "
@@ -944,9 +1744,6 @@ elif page == PAGE_ANOMALY:
                 "<code>abs_error<sub>t</sub> = |demand<sub>t</sub> − "
                 "forecast<sub>t</sub>|</code> values in the rolling 3-month "
                 "window.<br/>"
-                "<b>Violin width</b>: Gaussian kernel density estimate of the "
-                "error distribution. Wider regions indicate error magnitudes "
-                "that occur more frequently.<br/>"
                 "<b>Box elements</b>: box edges = Q1 and Q3; center line = "
                 "median; whiskers = 1.5 × IQR beyond the box.<br/>"
                 "<b>Ordering</b>: BAs are sorted top-to-bottom by median "
@@ -962,9 +1759,9 @@ elif page == PAGE_ANOMALY:
             "LMP Price Anomalies",
             help=(
                 "Detects price dislocations at ISO pricing nodes (zones and hubs). "
-                "Two event classes are flagged: <b>SPIKE</b> — sustained high prices, "
+                "Two event classes are flagged: <b>SPIKE</b> - sustained high prices, "
                 "typically driven by scarcity, transmission congestion, or supply "
-                "shortfalls; and <b>NEGATIVE</b> — sub-zero prices, which occur "
+                "shortfalls; and <b>NEGATIVE</b> - sub-zero prices, which occur "
                 "when must-run or subsidized generation (wind, nuclear, thermal "
                 "minimums) exceeds load and generators pay the grid to keep "
                 "producing. Both signal real dispatch and hedging opportunities "
@@ -986,37 +1783,87 @@ elif page == PAGE_ANOMALY:
 
             l_r, l_y, l_g = st.columns(3)
             with l_r:
-                st.markdown(f"#### 🔴 Price Spike ({len(spike)})")
-                for _, r in spike.head(8).iterrows():
-                    st.error(
-                        f"**{r['iso']} — {r['location']}**  \n"
-                        f"6h avg: **${r['recent_avg_lmp']:,.1f}**/MWh"
-                        f" · median: ${r['historical_median']:,.1f}"
-                        f" · ratio: {r['spike_ratio']:.1f}×",
-                        icon="🔴",
-                    )
-                if spike.empty:
-                    st.caption("None.")
+                _render_status_panel(
+                    "Price Spike",
+                    len(spike),
+                    "critical",
+                    [
+                        (
+                            f"<b>{r['iso']} - {r['location']}</b><br/>"
+                            f"6h avg: <b>${r['recent_avg_lmp']:,.1f}</b>/MWh | "
+                            f"Median: ${r['historical_median']:,.1f} | "
+                            f"Ratio: {r['spike_ratio']:.1f}x"
+                        )
+                        for _, r in spike.head(8).iterrows()
+                    ],
+                )
             with l_y:
-                st.markdown(f"#### 🟡 Negative Prices ({len(neg)})")
-                for _, r in neg.head(8).iterrows():
-                    st.warning(
-                        f"**{r['iso']} — {r['location']}**  \n"
-                        f"Min: **${r['recent_min_lmp']:,.1f}**/MWh"
-                        f" · 6h avg: ${r['recent_avg_lmp']:,.1f}",
-                        icon="🟡",
-                    )
-                if neg.empty:
-                    st.caption("None.")
+                _render_status_panel(
+                    "Negative Prices",
+                    len(neg),
+                    "warning",
+                    [
+                        (
+                            f"<b>{r['iso']} - {r['location']}</b><br/>"
+                            f"Min: <b>${r['recent_min_lmp']:,.1f}</b>/MWh | "
+                            f"6h avg: ${r['recent_avg_lmp']:,.1f}"
+                        )
+                        for _, r in neg.head(8).iterrows()
+                    ],
+                )
             with l_g:
-                st.markdown(f"#### 🟢 Normal ({len(norm)})")
-                for _, r in norm.head(8).iterrows():
-                    st.success(
-                        f"**{r['iso']} — {r['location']}**  \nLatest: ${r['latest_lmp']:,.1f}/MWh",
-                        icon="🟢",
-                    )
-                if norm.empty:
-                    st.caption("None.")
+                _render_status_panel(
+                    "Normal",
+                    len(norm),
+                    "normal",
+                    [
+                        (
+                            f"<b>{r['iso']} - {r['location']}</b><br/>"
+                            f"Latest: ${r['latest_lmp']:,.1f}/MWh"
+                        )
+                        for _, r in norm.head(8).iterrows()
+                    ],
+                )
+
+            with st.expander("Investigate flagged LMP locations", expanded=False):
+                flagged = pd.concat([spike.head(6), neg.head(6)], ignore_index=True)
+                if flagged.empty:
+                    st.caption("No flagged LMP locations.")
+                else:
+                    for _, r in flagged.iterrows():
+                        st.markdown(f"**{r['iso']} - {r['location']}**")
+                        if r["status"] == "SPIKE":
+                            st.write(
+                                "Spike condition: recent average price is materially "
+                                "above the historical median."
+                            )
+                        else:
+                            st.write(
+                                "Negative-price condition: at least one recent hour "
+                                "fell below the negative threshold."
+                            )
+                        b1, b2 = st.columns(2)
+                        with b1:
+                            _nav_button(
+                                "Open this drill-down",
+                                f"anom-lmp-open-{r['iso']}-{r['location']}",
+                                page=PAGE_ANOMALY,
+                                ba=sel_ba,
+                                iso=r["iso"],
+                                location=r["location"],
+                                focus="LMP Time Series",
+                            )
+                        with b2:
+                            _nav_button(
+                                "Open briefing",
+                                f"anom-lmp-brief-{r['iso']}-{r['location']}",
+                                page=PAGE_BRIEFING,
+                                ba=sel_ba,
+                                iso=r["iso"],
+                                location=r["location"],
+                                focus="LMP Price Anomalies",
+                            )
+                        st.markdown("---")
 
             _source(
                 "Day-ahead hourly LMP for CAISO and ERCOT zones/hubs, retrieved "
@@ -1025,7 +1872,7 @@ elif page == PAGE_ANOMALY:
             )
             _methodology(
                 "<b>Inputs</b>: hourly day-ahead LMP series "
-                "(<code>lmp<sub>t</sub></code>) for each ISO × location pair over "
+                "(<code>lmp<sub>t</sub></code>) for each ISO x location pair over "
                 "the last 30 days. Only <code>ZONE</code>, <code>HUB</code>, and "
                 "<code>TRADING_HUB</code> locations are retained; resource-node "
                 "LMPs are excluded.<br/>"
@@ -1039,23 +1886,40 @@ elif page == PAGE_ANOMALY:
                 "over this window.<br/>"
                 "<b>Classification</b>:<br/>"
                 "&nbsp;&nbsp;• <code>SPIKE</code> if "
-                "<code>avg<sub>6h</sub> > 3 × median<sub>hist</sub></code>"
+                "<code>avg<sub>6h</sub> > 3 x median<sub>hist</sub></code>"
                 " (multiplier = <code>LMP_SPIKE_MULTIPLIER</code>)<br/>"
                 "&nbsp;&nbsp;• <code>NEGATIVE</code> if "
-                "<code>min<sub>6h</sub> < −$10/MWh</code>"
+                "<code>min<sub>6h</sub> < -$10/MWh</code>"
                 " (threshold = <code>LMP_NEGATIVE_THRESHOLD</code>)<br/>"
                 "&nbsp;&nbsp;• <code>NORMAL</code> otherwise. SPIKE takes priority "
                 "over NEGATIVE when both conditions apply."
             )
 
             # Time series for a selected location
-            st.markdown("**LMP time series — drill down**")
+            st.subheader(
+                "LMP Time Series",
+                help=(
+                    "Select one ISO and one zone or hub to inspect the raw 30-day "
+                    "price path behind the anomaly classification. The chart overlays "
+                    "the historical median, spike threshold, and negative-price threshold."
+                ),
+            )
             iso_options = sorted(lmp_alerts["iso"].unique().tolist())
+            current_iso = st.session_state.get("nav_target_iso")
+            if current_iso not in iso_options and iso_options:
+                current_iso = iso_options[0]
+            loc_options = sorted(
+                lmp_alerts[lmp_alerts["iso"] == current_iso]["location"].unique().tolist()
+            )
+            _sync_lmp_state(iso_options, loc_options)
             iso_pick = st.selectbox("ISO", iso_options, key="lmp_iso")
             loc_options = sorted(
                 lmp_alerts[lmp_alerts["iso"] == iso_pick]["location"].unique().tolist()
             )
+            if st.session_state.get("lmp_loc") not in loc_options and loc_options:
+                st.session_state["lmp_loc"] = loc_options[0]
             loc_pick = st.selectbox("Location", loc_options, key="lmp_loc")
+            _set_nav(iso=iso_pick, location=loc_pick, focus="LMP Time Series")
             ts = get_lmp_time_series(_D["lmp"], iso_pick, loc_pick)
             if not ts.empty:
                 row = lmp_alerts[
@@ -1101,7 +1965,7 @@ elif page == PAGE_ANOMALY:
                     y=-10,
                     line_dash="dash",
                     line_color=C_AMBER,
-                    annotation_text="<b>Negative threshold = −$10</b>",
+                    annotation_text="<b>Negative threshold = -$10</b>",
                     annotation_font=dict(color=C_AMBER, size=10),
                     annotation_bgcolor="white",
                     annotation_bordercolor=C_AMBER,
@@ -1121,10 +1985,10 @@ elif page == PAGE_ANOMALY:
                     "applied by the classifier above:<br/>"
                     "&nbsp;&nbsp;• <b>Median line</b> = historical median LMP for "
                     "this location across the full 30-day window.<br/>"
-                    "&nbsp;&nbsp;• <b>Spike threshold</b> = <code>3 × median</code>. "
+                    "&nbsp;&nbsp;• <b>Spike threshold</b> = <code>3 x median</code>. "
                     "Hours with 6-hour rolling average above this line feed the "
                     "SPIKE classification.<br/>"
-                    "&nbsp;&nbsp;• <b>Negative threshold</b> = <code>−$10/MWh</code>. "
+                    "&nbsp;&nbsp;• <b>Negative threshold</b> = <code>-$10/MWh</code>. "
                     "Any recent hour below this line feeds the NEGATIVE "
                     "classification."
                 )
@@ -1137,11 +2001,12 @@ elif page == PAGE_ANOMALY:
 # ===================================================================
 elif page == PAGE_ARBITRAGE:
     t0 = time.time()
-    st.title("💰 Arbitrage Signals")
+    st.title("Arbitrage Signals")
     _cross_ref(
         "Top route for the selected BA appears in the <b>Executive Briefing</b>. "
         "Inter-BA flow signals are paired with intra-ISO zonal LMP spreads below."
     )
+    _render_context_bar(PAGE_ARBITRAGE)
     st.markdown(
         "Identifies persistent directional power flows between regions during peak "
         "hours, indicating potential price differentials.",
@@ -1281,6 +2146,36 @@ elif page == PAGE_ARBITRAGE:
             "EIA Form 930 hourly interchange, aggregated to NERC peak hours "
             "over the full 3-month window."
         )
+        quick_route = disp.iloc[0]
+        qa1, qa2, qa3 = st.columns(3)
+        with qa1:
+            _nav_button(
+                "Inspect top route",
+                "arb-top-route",
+                page=PAGE_ARBITRAGE,
+                ba=quick_route["fromba"],
+                fromba=quick_route["fromba"],
+                toba=quick_route["toba"],
+                focus="Route Profile",
+            )
+        with qa2:
+            _nav_button(
+                "Open briefing for source BA",
+                "arb-top-brief",
+                page=PAGE_BRIEFING,
+                ba=quick_route["fromba"],
+                fromba=quick_route["fromba"],
+                toba=quick_route["toba"],
+                focus="Top Arbitrage Routes",
+            )
+        with qa3:
+            _nav_button(
+                "Open compliance for source BA",
+                "arb-top-comp",
+                page=PAGE_COMPLIANCE,
+                ba=quick_route["fromba"],
+                focus="Interchange",
+            )
 
         _section_divider()
 
@@ -1377,9 +2272,51 @@ elif page == PAGE_ARBITRAGE:
             ),
         )
         pair_opts = [f"{r['fromba']} → {r['toba']}" for _, r in signals.head(10).iterrows()]
-        sel_pair = st.selectbox("Select route", pair_opts)
+        _sync_route_state(pair_opts)
+        sel_pair = st.selectbox("Select route", pair_opts, key="route_select")
         if sel_pair:
             parts = sel_pair.split(" → ")
+            _set_nav(ba=parts[0], fromba=parts[0], toba=parts[1], focus="Route Profile")
+            route_row = signals[(signals["fromba"] == parts[0]) & (signals["toba"] == parts[1])]
+            if not route_row.empty:
+                route_row = route_row.iloc[0]
+                st.info(_route_signal_summary(route_row))
+                b1, b2, b3, b4 = st.columns(4)
+                with b1:
+                    _nav_button(
+                        "Inspect route",
+                        "arb-route-self",
+                        page=PAGE_ARBITRAGE,
+                        ba=parts[0],
+                        fromba=parts[0],
+                        toba=parts[1],
+                        focus="Route Profile",
+                    )
+                with b2:
+                    _nav_button(
+                        "Set from-BA as current BA",
+                        "arb-route-set-ba",
+                        ba=parts[0],
+                        focus="Route Profile",
+                    )
+                with b3:
+                    _nav_button(
+                        "Open Executive Briefing",
+                        "arb-route-brief",
+                        page=PAGE_BRIEFING,
+                        ba=parts[0],
+                        fromba=parts[0],
+                        toba=parts[1],
+                        focus="Top Arbitrage Routes",
+                    )
+                with b4:
+                    _nav_button(
+                        "Open Compliance",
+                        "arb-route-comp",
+                        page=PAGE_COMPLIANCE,
+                        ba=parts[0],
+                        focus="Interchange",
+                    )
             prof = get_pair_hourly_profile(_D["interchange"], parts[0], parts[1])
             if not prof.empty:
                 fig_p = go.Figure()
@@ -1556,11 +2493,12 @@ elif page == PAGE_ARBITRAGE:
 # ===================================================================
 elif page == PAGE_TRANSITION:
     t0 = time.time()
-    st.title("🌱 Transition Scoring")
+    st.title("Transition Scoring")
     _cross_ref(
         "Composite scores feed into <b>Executive Briefing</b> and "
         "<b>Compliance Reports §5</b>. High-scoring BAs deserve operational scrutiny."
     )
+    _render_context_bar(PAGE_TRANSITION)
     st.markdown(
         "Composite scoring of clean energy investment opportunity by region, "
         "combining EIA operational data with the LBNL interconnection queue "
@@ -1644,6 +2582,40 @@ elif page == PAGE_TRANSITION:
             "BA, the composite reduces to the four EIA factors at equal 25% "
             "weighting."
         )
+        quick_ba_map = {f"{r['ba']} - {r['name']}": r["ba"] for _, r in scores.iterrows()}
+        quick_pick = st.selectbox(
+            "Use ranked BA",
+            list(quick_ba_map.keys()),
+            key="transition_quick_pick",
+        )
+        picked_ba = quick_ba_map[quick_pick]
+        qa1, qa2, qa3, qa4 = st.columns(4)
+        with qa1:
+            _nav_button("Use this BA", "trans-use-ba", ba=picked_ba, focus="Transition Scoring")
+        with qa2:
+            _nav_button(
+                "Open Executive Briefing",
+                "trans-open-brief",
+                page=PAGE_BRIEFING,
+                ba=picked_ba,
+                focus="Transition Score",
+            )
+        with qa3:
+            _nav_button(
+                "Open Compliance",
+                "trans-open-comp",
+                page=PAGE_COMPLIANCE,
+                ba=picked_ba,
+                focus="Cross-Module Signals",
+            )
+        with qa4:
+            _nav_button(
+                "See anomaly context",
+                "trans-open-anom",
+                page=PAGE_ANOMALY,
+                ba=picked_ba,
+                focus="Forecast Status",
+            )
 
         # Radar + table
         col_r, col_t = st.columns([1, 1])
@@ -1702,6 +2674,39 @@ elif page == PAGE_TRANSITION:
                 )
                 _style(fig_r, h=400)
                 st.plotly_chart(fig_r, use_container_width=True)
+                st.info(_transition_strength_summary(row))
+                b1, b2, b3, b4 = st.columns(4)
+                with b1:
+                    _nav_button(
+                        "Use this BA",
+                        "trans-selected-use",
+                        ba=sel_ba,
+                        focus="Six-Factor Profile",
+                    )
+                with b2:
+                    _nav_button(
+                        "Open Executive Briefing",
+                        "trans-selected-brief",
+                        page=PAGE_BRIEFING,
+                        ba=sel_ba,
+                        focus="Transition Score",
+                    )
+                with b3:
+                    _nav_button(
+                        "Open Compliance",
+                        "trans-selected-comp",
+                        page=PAGE_COMPLIANCE,
+                        ba=sel_ba,
+                        focus="Cross-Module Signals",
+                    )
+                with b4:
+                    _nav_button(
+                        "Inspect queue details",
+                        "trans-selected-queue",
+                        page=PAGE_TRANSITION,
+                        ba=sel_ba,
+                        focus="Interconnection Queue",
+                    )
                 _source(f"EIA Form 930 + LBNL queue, filtered to BA {sel_ba}.")
                 _methodology(
                     "<b>1. Demand Growth</b> — compare average daily demand "
@@ -2017,11 +3022,12 @@ elif page == PAGE_TRANSITION:
 # ===================================================================
 elif page == PAGE_COMPLIANCE:
     t0 = time.time()
-    st.title("📋 Compliance Reports")
+    st.title("Compliance Reports")
     _cross_ref(
         "FERC-style summary for the selected BA. <b>§5 Cross-Module Signals</b> "
         "injects the latest anomaly status and transition score."
     )
+    _render_context_bar(PAGE_COMPLIANCE)
     st.markdown(
         f"Automated regulatory summary for **{BA_NAMES[sel_ba]}**.",
         help="FERC-style operational summary from EIA Form 930 data. Change BA in sidebar.",
@@ -2077,6 +3083,23 @@ elif page == PAGE_COMPLIANCE:
                 "<code>total_hours = count(value)</code>, all computed on the "
                 "<code>Demand</code> rows of <code>hourly_demand</code>."
             )
+            b1, b2 = st.columns(2)
+            with b1:
+                _nav_button(
+                    "Open Executive Briefing",
+                    "comp-demand-brief",
+                    page=PAGE_BRIEFING,
+                    ba=sel_ba,
+                    focus="Latest Demand",
+                )
+            with b2:
+                _nav_button(
+                    "Open anomaly diagnostics",
+                    "comp-demand-anom",
+                    page=PAGE_ANOMALY,
+                    ba=sel_ba,
+                    focus="Error Control Chart",
+                )
 
     with c2:
         if "forecast_accuracy" in sec:
@@ -2117,6 +3140,23 @@ elif page == PAGE_COMPLIANCE:
                 "&nbsp;&nbsp;• <code>Bias = mean( error<sub>t</sub> )</code>"
                 " — signed, not absolute"
             )
+            b1, b2 = st.columns(2)
+            with b1:
+                _nav_button(
+                    "Open anomaly diagnostics",
+                    "comp-forecast-anom",
+                    page=PAGE_ANOMALY,
+                    ba=sel_ba,
+                    focus="Forecast Accuracy",
+                )
+            with b2:
+                _nav_button(
+                    "Open Executive Briefing",
+                    "comp-forecast-brief",
+                    page=PAGE_BRIEFING,
+                    ba=sel_ba,
+                    focus="Forecast Status",
+                )
 
     _section_divider()
     c3, c4 = st.columns(2)
@@ -2157,6 +3197,23 @@ elif page == PAGE_COMPLIANCE:
                 "&nbsp;&nbsp;• <code>n_trading_partners = "
                 "nunique(toba)</code> — count of distinct destinations"
             )
+            b1, b2 = st.columns(2)
+            with b1:
+                _nav_button(
+                    "Open arbitrage signals",
+                    "comp-interchange-arb",
+                    page=PAGE_ARBITRAGE,
+                    ba=sel_ba,
+                    focus="Top Opportunities",
+                )
+            with b2:
+                _nav_button(
+                    "Open Executive Briefing",
+                    "comp-interchange-brief",
+                    page=PAGE_BRIEFING,
+                    ba=sel_ba,
+                    focus="Top Arbitrage Routes",
+                )
 
     with c4:
         if "generation_mix" in sec:
@@ -2212,6 +3269,23 @@ elif page == PAGE_COMPLIANCE:
                     "aggregation by sum treats each hour as a 1 MWh bucket, "
                     "which is the correct energy-weighted interpretation."
                 )
+                b1, b2 = st.columns(2)
+                with b1:
+                    _nav_button(
+                        "Open transition factors",
+                        "comp-genmix-transition",
+                        page=PAGE_TRANSITION,
+                        ba=sel_ba,
+                        focus="Renewable Headroom",
+                    )
+                with b2:
+                    _nav_button(
+                        "Open Executive Briefing",
+                        "comp-genmix-brief",
+                        page=PAGE_BRIEFING,
+                        ba=sel_ba,
+                        focus="Renewable Share",
+                    )
 
     _section_divider()
 
@@ -2241,14 +3315,35 @@ elif page == PAGE_COMPLIANCE:
                 st.markdown(_status_pill(cross["anomaly_status"]), unsafe_allow_html=True)
                 if "hours_above_p95" in cross:
                     st.caption(f"Hours above P95 in last 6h: {cross['hours_above_p95']}")
+                _nav_button(
+                    "Open anomaly diagnostics",
+                    "comp-cross-anom",
+                    page=PAGE_ANOMALY,
+                    ba=sel_ba,
+                    focus="Forecast Status",
+                )
             else:
                 st.caption("No anomaly data.")
         with cm2:
             if "transition_composite_score" in cross:
                 cm2.metric("Transition Score", f"{cross['transition_composite_score']:.1f}")
+                _nav_button(
+                    "Open transition factors",
+                    "comp-cross-transition",
+                    page=PAGE_TRANSITION,
+                    ba=sel_ba,
+                    focus="Six-Factor Profile",
+                )
         with cm3:
             if "active_queue_mw" in cross:
                 cm3.metric("Active Queue", f"{cross['active_queue_mw']:,.0f} MW")
+                _nav_button(
+                    "Open queue details",
+                    "comp-cross-queue",
+                    page=PAGE_TRANSITION,
+                    ba=sel_ba,
+                    focus="Interconnection Queue",
+                )
         _source(
             "Injected from the Anomaly Detection and Transition Scoring "
             "modules for this BA. Click through to those modules for full "
@@ -2277,13 +3372,13 @@ elif page == PAGE_COMPLIANCE:
 # ===================================================================
 elif page == PAGE_ABOUT:
     t0 = time.time()
-    st.title("📄 About")
+    st.title("About")
 
     st.markdown(
         """
-        # ⚡ Grid Intelligence Platform
+        # Grid Intelligence Platform
 
-        **Bloomberg Terminal for those who can't afford one.**
+        **An investigation-first power market intelligence dashboard built on public data.**
 
         An open-source power market intelligence platform that turns public EIA,
         NREL, and LBNL data into actionable decision signals for small retail
@@ -2311,18 +3406,37 @@ elif page == PAGE_ABOUT:
 
         It is organized around six modules:
 
-        1. **📊 Executive Briefing** — single-pane snapshot of one BA, drawing
-           signals from every other module
-        2. **🚨 Anomaly Detection** — BA-level forecast error monitoring with
-           P90/P95 control charts and cross-BA distribution comparison
-        3. **💰 Arbitrage Signals** — persistent peak-hour interchange flow
+        1. **Executive Briefing** — the main investigation hub for a selected
+           BA, combining KPI summaries, interpretations, and drill-down entry points
+        2. **Anomaly Detection** — BA-level forecast error monitoring plus
+           ISO LMP anomaly triage with prefilled drill-down context
+        3. **Arbitrage Signals** — persistent peak-hour interchange flow
            patterns suggesting cross-market price imbalance
-        4. **🌱 Transition Scoring** — six-factor renewable opportunity scoring
+        4. **Transition Scoring** — six-factor renewable opportunity scoring
            combining EIA operational data, LBNL queue activity, and NREL solar
            resource potential
-        5. **📋 Compliance Reports** — FERC-style §1–§4 operational summaries
-           with §5 cross-module signal injection
-        6. **📄 About** — this page
+        5. **Compliance Reports** — FERC-style §1–§4 operational summaries
+           with §5 cross-module signal injection and return links to visual modules
+        6. **About** — this page
+
+        ---
+        ## Investigation workflow
+
+        This app is designed to behave as one connected workflow rather than
+        six disconnected pages.
+
+        A shared Streamlit session-state layer preserves investigation context
+        across modules, including:
+
+        - selected BA
+        - selected BA-to-BA route
+        - selected ISO and LMP location
+        - current focus area
+
+        This means a user can start from the Executive Briefing, jump into an
+        anomaly, inspect a route, move into a compliance summary, and continue
+        with the same analytical context instead of repeatedly reselecting the
+        same entity.
 
         ---
         ## Methodology
@@ -2405,6 +3519,13 @@ elif page == PAGE_ABOUT:
         `st.cache_resource(ttl=3600)`, then serves all pages from in-memory
         DataFrames for sub-second navigation across modules.
 
+        ### Stage 3: Investigation layer
+        A lightweight navigation state layer built with `st.session_state`
+        connects the modules into one investigation workflow. Drill-down
+        buttons pass BA, route, ISO, location, and focus context from one
+        page to another so high-level signals can be traced into deeper
+        diagnostics without manual reconfiguration.
+
         ### BigQuery dataset: `sipa-adv-c-silly-penguin.eia_data`
         **Raw tables**: `hourly_demand`, `hourly_interchange`, `hourly_fuel_type`,
         `daily_ng_price`, `daily_weather`, `nrel_resource_locations`,
@@ -2430,6 +3551,9 @@ elif page == PAGE_ABOUT:
         - **Weather is single-point.** One reference location per BA — adequate
           for high-level demand-temperature correlation, not sufficient for
           fine-grained generation forecasting.
+        - **Workflow guidance is heuristic.** Cross-page drill-downs preserve
+          context and improve navigation, but they do not replace expert
+          interpretation of market structure or policy significance.
         - **Arbitrage signals reflect physical flow patterns, not confirmed
           price spreads.** Without LMP data, we infer opportunity from
           persistent directional flows during peak hours rather than measuring

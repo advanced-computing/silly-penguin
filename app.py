@@ -13,6 +13,7 @@ from plotly.subplots import make_subplots
 
 from data_processing import (
     build_executive_briefing,
+    compute_forecast_errors,
     compute_interchange_patterns,
     compute_lmp_zonal_spreads,
     compute_transition_scores,
@@ -363,6 +364,109 @@ def _inject_global_styles() -> None:
         .status-critical { color: #b91c1c; border-top: 3px solid #dc2626; }
         .status-warning { color: #b45309; border-top: 3px solid #d97706; }
         .status-normal { color: #047857; border-top: 3px solid #059669; }
+        .insight-card {
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid #dbe4ee;
+            border-left: 4px solid #0369a1;
+            border-radius: 14px;
+            padding: 1rem 1.1rem;
+            margin: 1rem 0 0.9rem 0;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+        }
+        .insight-eyebrow {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 0.35rem;
+        }
+        .insight-title {
+            font-family: "IBM Plex Mono", "SFMono-Regular", Consolas,
+                "Liberation Mono", monospace !important;
+            font-size: 1.02rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 0.4rem;
+        }
+        .insight-copy {
+            font-size: 0.93rem;
+            line-height: 1.55;
+            color: #334155;
+        }
+        .insight-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 0.75rem;
+        }
+        .insight-chip {
+            border: 1px solid #cbd5e1;
+            border-radius: 999px;
+            padding: 0.16rem 0.55rem;
+            background: #f8fafc;
+            color: #475569;
+            font-size: 0.74rem;
+            font-weight: 600;
+        }
+        .why-line {
+            background: #f8fafc;
+            border-left: 3px solid #0891b2;
+            padding: 0.58rem 0.8rem;
+            margin: 0.2rem 0 0.55rem 0;
+            color: #334155;
+            font-size: 0.84rem;
+            line-height: 1.5;
+        }
+        .why-label {
+            color: #0369a1;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-size: 0.7rem;
+            margin-right: 0.45rem;
+        }
+        .tension-card {
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid #dbe4ee;
+            border-left: 4px solid #d97706;
+            border-radius: 14px;
+            padding: 0.95rem 1.05rem;
+            margin: 0.9rem 0 0.9rem 0;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+        }
+        .tension-item {
+            border-top: 1px solid #e5e7eb;
+            padding: 0.65rem 0 0.25rem 0;
+        }
+        .tension-item:first-of-type {
+            border-top: none;
+            padding-top: 0;
+        }
+        .tension-label {
+            display: inline-block;
+            border: 1px solid #f59e0b;
+            border-radius: 999px;
+            padding: 0.08rem 0.45rem;
+            margin-right: 0.45rem;
+            color: #92400e;
+            background: #fffbeb;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .tension-title {
+            color: #0f172a;
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+        .tension-copy {
+            color: #334155;
+            font-size: 0.84rem;
+            line-height: 1.5;
+            margin-top: 0.25rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -457,6 +561,456 @@ def _render_status_panel(title: str, count: int, tone: str, rows: list[str]) -> 
             f"</div>{body}</div>"
         ),
         unsafe_allow_html=True,
+    )
+
+
+def _num_or_none(value) -> float | None:
+    """Convert a scalar to a finite float, preserving missing values."""
+    try:
+        if value is None or pd.isna(value):
+            return None
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if np.isfinite(out) else None
+
+
+def _format_compact(value: float | None, suffix: str = "", decimals: int = 1) -> str:
+    """Format dashboard comparison values."""
+    if value is None:
+        return "—"
+    if suffix == " MW":
+        return f"{value:,.0f} MW"
+    if suffix == "%":
+        return f"{value:.{decimals}f}%"
+    return f"{value:.{decimals}f}{suffix}"
+
+
+def _format_peer_delta(
+    value: float | None, median: float | None, suffix: str = "", decimals: int = 1
+) -> str | None:
+    """Format the difference from peer median for st.metric."""
+    if value is None or median is None:
+        return None
+    diff = value - median
+    if abs(diff) < (0.5 if suffix == " MW" else 0.05):
+        return "At peer median"
+    sign = "+" if diff > 0 else ""
+    if suffix == " MW":
+        return f"{sign}{diff:,.0f} MW vs median"
+    return f"{sign}{diff:.{decimals}f}{suffix} vs median"
+
+
+def _build_ba_peer_metrics(
+    ba: str, demand_df: pd.DataFrame, transition_scores: pd.DataFrame
+) -> dict[str, dict[str, float | None]]:
+    """Build selected-BA metrics and peer medians from existing signals."""
+    metrics: dict[str, dict[str, float | None]] = {}
+
+    errors = compute_forecast_errors(demand_df)
+    if not errors.empty and "ape" in errors.columns:
+        mape_by_ba = errors[errors["respondent"].isin(MAJOR_BA)].groupby("respondent")["ape"].mean()
+        if not mape_by_ba.empty:
+            metrics["mape"] = {
+                "value": _num_or_none(mape_by_ba.get(ba)),
+                "median": _num_or_none(mape_by_ba.median()),
+            }
+
+    if transition_scores is not None and not transition_scores.empty:
+        scores = transition_scores[transition_scores["ba"].isin(MAJOR_BA)].copy()
+        ba_score = scores[scores["ba"] == ba]
+        if not ba_score.empty:
+            row = ba_score.iloc[0]
+            field_map = {
+                "transition": "composite_score",
+                "renewable": "current_renewable_pct",
+                "queue": "active_capacity_mw",
+            }
+            for key, field in field_map.items():
+                if field in scores.columns:
+                    metrics[key] = {
+                        "value": _num_or_none(row.get(field)),
+                        "median": _num_or_none(scores[field].median()),
+                    }
+
+    return metrics
+
+
+def _render_peer_comparison_strip(metrics: dict[str, dict[str, float | None]]) -> None:
+    """Render a compact selected-BA versus peer-median comparison strip."""
+    st.markdown(
+        "<div class='insight-eyebrow' style='margin-top:0.6rem;'>Selected BA vs Peer Median</div>",
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(4)
+    specs = [
+        ("Forecast MAPE", "mape", "%", 2, "inverse"),
+        ("Transition Score", "transition", "", 1, "normal"),
+        ("Renewable Share", "renewable", "%", 1, "off"),
+        ("Active Queue", "queue", " MW", 0, "normal"),
+    ]
+    for col, (label, key, suffix, decimals, delta_color) in zip(cols, specs, strict=True):
+        metric = metrics.get(key, {})
+        value = _num_or_none(metric.get("value"))
+        median = _num_or_none(metric.get("median"))
+        col.metric(
+            label,
+            _format_compact(value, suffix=suffix, decimals=decimals),
+            delta=_format_peer_delta(value, median, suffix=suffix, decimals=decimals),
+            delta_color=delta_color,
+        )
+
+
+def _build_policy_recommendation(
+    ba: str,
+    briefing: dict,
+    peer_metrics: dict[str, dict[str, float | None]],
+    transition_scores: pd.DataFrame,
+) -> tuple[str, str, list[str]]:
+    """Create a lightweight policy recommendation from existing dashboard signals."""
+    status = briefing.get("anomaly_status", "NO_DATA")
+    score = _num_or_none(briefing.get("transition_score"))
+    renewable = _num_or_none(briefing.get("renewable_share_pct"))
+    queue = _num_or_none(briefing.get("active_queue_mw"))
+    queue_median = _num_or_none(peer_metrics.get("queue", {}).get("median"))
+    mape = _num_or_none(peer_metrics.get("mape", {}).get("value"))
+    mape_median = _num_or_none(peer_metrics.get("mape", {}).get("median"))
+    top_arb = _num_or_none(briefing.get("top_arbitrage_score"))
+
+    ba_row = pd.Series(dtype="float64")
+    if transition_scores is not None and not transition_scores.empty:
+        match = transition_scores[transition_scores["ba"] == ba]
+        if not match.empty:
+            ba_row = match.iloc[0]
+    queue_completion = _num_or_none(ba_row.get("queue_completion_score"))
+
+    if status in {"RED", "YELLOW"}:
+        title = "Stabilize forecasting before expanding exposure."
+        copy = (
+            f"{ba} is carrying elevated forecast-error risk. Policy attention should "
+            "start with forecast model calibration, data-quality checks, and reserve "
+            "planning before treating the region as a low-friction growth target."
+        )
+    elif (
+        score is not None
+        and score >= 65
+        and queue_median is not None
+        and (queue or 0) >= queue_median
+    ):
+        title = "Accelerate queue throughput for clean buildout."
+        copy = (
+            f"{ba} combines a strong transition score with an above-median active "
+            "project pipeline. The highest-value intervention is likely queue "
+            "processing, interconnection transparency, and transmission readiness."
+        )
+    elif score is not None and score >= 65:
+        title = "Convert latent transition potential into a stronger pipeline."
+        copy = (
+            f"{ba} scores well on transition fundamentals, but the active queue is "
+            "not yet the dominant signal. Siting incentives and developer certainty "
+            "could help turn operational need into real projects."
+        )
+    elif renewable is not None and renewable >= 45:
+        title = "Shift from buildout volume to integration quality."
+        copy = (
+            f"{ba} already has a relatively renewable-heavy mix. Near-term policy "
+            "leverage is more likely in flexibility, storage, congestion relief, "
+            "and balancing rules than in generic renewable headroom."
+        )
+    elif top_arb is not None and top_arb >= 75:
+        title = "Treat interchange constraints as the main opportunity signal."
+        copy = (
+            f"{ba}'s strongest signal is persistent directional interchange. This "
+            "points toward transmission optionality, storage siting, and hedging "
+            "strategy rather than only local generation expansion."
+        )
+    elif mape is not None and mape_median is not None and mape > mape_median:
+        title = "Pair compliance review with forecast-performance improvement."
+        copy = (
+            f"{ba}'s forecast accuracy is weaker than the peer median. A practical "
+            "policy move is to connect reporting compliance with operational "
+            "forecast governance and model accountability."
+        )
+    else:
+        title = "Use this BA as a steady benchmark, then target specific constraints."
+        copy = (
+            f"{ba} is not flashing a single dominant stress signal. It works well "
+            "as a monitoring baseline while targeted policy effort follows the "
+            "largest deviation from peer median."
+        )
+
+    chips = [f"Forecast: {status.replace('_', ' ')}"]
+    if score is not None:
+        chips.append(f"Transition {score:.1f}")
+    if mape is not None:
+        chips.append(f"MAPE {mape:.2f}%")
+    if queue is not None:
+        chips.append(f"Active queue {queue:,.0f} MW")
+    if queue_completion is not None:
+        chips.append(f"Queue completion score {queue_completion:.1f}")
+    if top_arb is not None:
+        chips.append(f"Top route score {top_arb:.1f}")
+    return title, copy, chips
+
+
+def _render_policy_recommendation(
+    ba: str,
+    briefing: dict,
+    peer_metrics: dict[str, dict[str, float | None]],
+    transition_scores: pd.DataFrame,
+) -> None:
+    """Render the recommendation card for the selected BA."""
+    title, copy, chips = _build_policy_recommendation(ba, briefing, peer_metrics, transition_scores)
+    chips_html = "".join([f"<span class='insight-chip'>{chip}</span>" for chip in chips])
+    st.markdown(
+        (
+            "<div class='insight-card'>"
+            "<div class='insight-eyebrow'>Policy Recommendation</div>"
+            f"<div class='insight-title'>{title}</div>"
+            f"<div class='insight-copy'>{copy}</div>"
+            f"<div class='insight-chips'>{chips_html}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _build_signal_tensions(
+    ba: str,
+    briefing: dict,
+    peer_metrics: dict[str, dict[str, float | None]],
+    transition_scores: pd.DataFrame,
+    sections: dict | None = None,
+) -> list[dict[str, str]]:
+    """Detect cross-signal contradictions using existing module outputs."""
+    sections = sections or {}
+    tensions: list[dict[str, str]] = []
+
+    status = briefing.get("anomaly_status", "NO_DATA")
+    score = _num_or_none(briefing.get("transition_score"))
+    renewable = _num_or_none(briefing.get("renewable_share_pct"))
+    queue = _num_or_none(briefing.get("active_queue_mw"))
+    top_arb = _num_or_none(briefing.get("top_arbitrage_score"))
+    queue_median = _num_or_none(peer_metrics.get("queue", {}).get("median"))
+    renewable_median = _num_or_none(peer_metrics.get("renewable", {}).get("median"))
+    mape = _num_or_none(peer_metrics.get("mape", {}).get("value"))
+    mape_median = _num_or_none(peer_metrics.get("mape", {}).get("median"))
+
+    row = pd.Series(dtype="float64")
+    if transition_scores is not None and not transition_scores.empty:
+        match = transition_scores[transition_scores["ba"] == ba]
+        if not match.empty:
+            row = match.iloc[0]
+    queue_score = _num_or_none(row.get("queue_active_score"))
+    completion_score = _num_or_none(row.get("queue_completion_score"))
+    renewable_headroom = _num_or_none(row.get("renewable_headroom_score"))
+    fossil_score = _num_or_none(row.get("fossil_transition_score"))
+
+    partners = None
+    if "interchange" in sections:
+        partners = _num_or_none(sections["interchange"].get("n_trading_partners"))
+
+    if score is not None and score >= 65 and status in {"RED", "YELLOW"}:
+        tensions.append(
+            {
+                "level": "Tension",
+                "title": "Long-run buildout case, short-run operating risk",
+                "copy": (
+                    f"{ba} has a strong transition score, but recent forecast errors "
+                    "are elevated. The opportunity case is real, yet near-term "
+                    "reliability governance should not be treated as solved."
+                ),
+            }
+        )
+
+    if (
+        score is not None
+        and score >= 65
+        and queue is not None
+        and queue_median is not None
+        and queue < queue_median
+    ):
+        tensions.append(
+            {
+                "level": "Gap",
+                "title": "High transition potential, thin active queue",
+                "copy": (
+                    "The model sees strong fundamentals, but developer applications "
+                    "are below the peer median. That gap suggests barriers in siting, "
+                    "interconnection certainty, or project economics."
+                ),
+            }
+        )
+
+    if (
+        queue is not None
+        and queue_median is not None
+        and queue >= queue_median
+        and completion_score is not None
+        and completion_score < 50
+    ):
+        tensions.append(
+            {
+                "level": "Bottleneck",
+                "title": "Developer interest is stronger than historical delivery",
+                "copy": (
+                    "Active queue capacity is sizable, but the completion score is "
+                    "weak. This is a classic pipeline bottleneck: applications exist, "
+                    "yet conversion into operating assets may be constrained."
+                ),
+            }
+        )
+
+    if (
+        renewable_headroom is not None
+        and renewable_headroom >= 60
+        and queue_score is not None
+        and queue_score < 35
+    ):
+        tensions.append(
+            {
+                "level": "Mismatch",
+                "title": "Renewable headroom without matching queue activity",
+                "copy": (
+                    "The generation mix leaves room for more renewables, but queue "
+                    "activity is weak. Policy effort may need to create bankable "
+                    "developer demand before focusing on technology mix."
+                ),
+            }
+        )
+
+    if (
+        renewable is not None
+        and renewable_median is not None
+        and renewable > renewable_median
+        and queue is not None
+        and queue_median is not None
+        and queue > queue_median
+    ):
+        tensions.append(
+            {
+                "level": "Integration",
+                "title": "Already-renewable BA still attracting a large pipeline",
+                "copy": (
+                    "This is not simple renewable headroom; it is an integration "
+                    "problem. Storage, congestion relief, and operating flexibility "
+                    "may matter more than generic buildout incentives."
+                ),
+            }
+        )
+
+    if top_arb is not None and top_arb >= 75 and partners is not None and partners <= 2:
+        tensions.append(
+            {
+                "level": "Concentration",
+                "title": "Strong arbitrage signal, narrow trading network",
+                "copy": (
+                    "A high route score with few trading partners means the market "
+                    "opportunity may be concentrated in a small number of interfaces, "
+                    "raising congestion and counterparty sensitivity."
+                ),
+            }
+        )
+
+    if mape is not None and mape_median is not None and mape > mape_median and status == "NORMAL":
+        tensions.append(
+            {
+                "level": "Watch",
+                "title": "Chronic accuracy lag without an acute anomaly",
+                "copy": (
+                    "The BA is not currently breaching recent control bands, but its "
+                    "average forecast accuracy is weaker than peers. This points to "
+                    "model-quality work rather than emergency response."
+                ),
+            }
+        )
+
+    if (
+        fossil_score is not None
+        and fossil_score >= 55
+        and renewable is not None
+        and renewable >= 35
+    ):
+        tensions.append(
+            {
+                "level": "Dual System",
+                "title": "Renewables are visible, but fossil exposure remains material",
+                "copy": (
+                    "The BA is not cleanly in one category: it has meaningful renewable "
+                    "generation while still carrying fossil-transition exposure. The "
+                    "policy question is sequencing, not just capacity addition."
+                ),
+            }
+        )
+
+    return tensions[:4]
+
+
+def _render_signal_tensions(
+    ba: str,
+    briefing: dict,
+    peer_metrics: dict[str, dict[str, float | None]],
+    transition_scores: pd.DataFrame,
+    sections: dict | None = None,
+) -> None:
+    """Render the cross-signal contradiction detector."""
+    tensions = _build_signal_tensions(
+        ba, briefing, peer_metrics, transition_scores, sections=sections
+    )
+    if tensions:
+        items = "".join(
+            [
+                (
+                    "<div class='tension-item'>"
+                    f"<span class='tension-label'>{item['level']}</span>"
+                    f"<span class='tension-title'>{item['title']}</span>"
+                    f"<div class='tension-copy'>{item['copy']}</div>"
+                    "</div>"
+                )
+                for item in tensions
+            ]
+        )
+    else:
+        items = (
+            "<div class='tension-copy'>No major cross-signal contradictions detected. "
+            "The current operating, investment, and compliance signals are broadly aligned.</div>"
+        )
+
+    st.markdown(
+        (
+            "<div class='tension-card'>"
+            "<div class='insight-eyebrow'>Cross-Signal Contradiction Detector</div>"
+            f"{items}"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _why_this_matters(text: str) -> None:
+    """Render a short decision-oriented interpretation below a chart or KPI block."""
+    if text:
+        st.markdown(
+            f"<div class='why-line'><span class='why-label'>Why this matters</span>{text}</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def _transition_profile_why(row: pd.Series) -> str:
+    """Summarize the strongest and weakest transition factors as a decision cue."""
+    factors = {
+        "demand growth": _num_or_none(row.get("demand_growth_score")) or 0,
+        "renewable headroom": _num_or_none(row.get("renewable_headroom_score")) or 0,
+        "import dependence": _num_or_none(row.get("import_dependence_score")) or 0,
+        "fossil transition": _num_or_none(row.get("fossil_transition_score")) or 0,
+        "queue activity": _num_or_none(row.get("queue_active_score")) or 0,
+        "queue completion": _num_or_none(row.get("queue_completion_score")) or 0,
+    }
+    strongest = max(factors, key=factors.get)
+    weakest = min(factors, key=factors.get)
+    return (
+        f"The investment thesis is strongest on {strongest} and weakest on {weakest}, "
+        "so the composite score should be read as a targeted policy diagnosis, not just a rank."
     )
 
 
@@ -917,6 +1471,16 @@ if page == PAGE_BRIEFING:
         transition_scores=_S["transition"],
         lmp_alerts=_S["lmp_alerts"],
     )
+    report = generate_compliance_summary(
+        _D["demand"],
+        _D["interchange"],
+        _D["fuel"],
+        sel_ba,
+        anomaly_alerts=_S["alerts"],
+        transition_scores=_S["transition"],
+    )
+    sec = report["sections"]
+    peer_metrics = _build_ba_peer_metrics(sel_ba, _D["demand"], _S["transition"])
 
     st.markdown(
         f"## {briefing['ba']} — {briefing['ba_name']}",
@@ -965,146 +1529,9 @@ if page == PAGE_BRIEFING:
         else:
             st.metric("Renewable Share", "—")
 
-    k1x, k2x, k3x, k4x = st.columns(4)
-    with k1x, st.expander("Interpret Forecast Status", expanded=False):
-        status = briefing.get("anomaly_status", "NO_DATA")
-        st.write(
-            "RED means 3 of the last 6 hours exceeded P95. "
-            "YELLOW means 3 exceeded P90. "
-            "NORMAL means recent error stayed inside control bands."
-        )
-        if briefing.get("latest_error_mwh") is not None:
-            st.caption(f"Latest absolute error: {briefing['latest_error_mwh']:,.0f} MWh.")
-        b1, b2 = st.columns(2)
-        with b1:
-            _nav_button(
-                "Open anomaly diagnostics",
-                "brief-forecast-anomaly",
-                page=PAGE_ANOMALY,
-                ba=sel_ba,
-                focus="Forecast Status",
-                status_message=f"Opened anomaly diagnostics for {sel_ba}.",
-            )
-        with b2:
-            _nav_button(
-                "Open compliance context",
-                "brief-forecast-comp",
-                page=PAGE_COMPLIANCE,
-                ba=sel_ba,
-                focus="Forecast Accuracy",
-            )
-    with k2x, st.expander("Inspect Latest Demand", expanded=False):
-        demand_series = _D["demand"]
-        demand_series = demand_series[
-            (demand_series["respondent"] == sel_ba) & (demand_series["type-name"] == "Demand")
-        ]
-        if not demand_series.empty:
-            mini = demand_series.sort_values("period").tail(min(days * 24, 72))
-            fig_mini = go.Figure(
-                go.Scatter(
-                    x=mini["period"],
-                    y=mini["value"],
-                    mode="lines",
-                    line=dict(color=C_PRIMARY, width=1.5),
-                )
-            )
-            fig_mini.update_layout(margin=dict(l=8, r=8, t=10, b=24), height=160)
-            _style(fig_mini, h=160)
-            st.plotly_chart(fig_mini, use_container_width=True)
-        b1, b2 = st.columns(2)
-        with b1:
-            _nav_button(
-                "Open full demand trend",
-                "brief-demand-trend",
-                page=PAGE_COMPLIANCE,
-                ba=sel_ba,
-                focus="Demand",
-            )
-        with b2:
-            _nav_button(
-                "See forecast error chart",
-                "brief-demand-error",
-                page=PAGE_ANOMALY,
-                ba=sel_ba,
-                focus="Error Control Chart",
-            )
-    with k3x, st.expander("Interpret Transition Score", expanded=False):
-        ba_trans = _S["transition"][_S["transition"]["ba"] == sel_ba]
-        if not ba_trans.empty:
-            row = ba_trans.iloc[0]
-            st.write(_transition_strength_summary(row))
-        st.write(
-            "Rank reflects this BA's relative clean-energy opportunity across the tracked set."
-        )
-        b1, b2 = st.columns(2)
-        with b1:
-            _nav_button(
-                "Open factor breakdown",
-                "brief-transition-factors",
-                page=PAGE_TRANSITION,
-                ba=sel_ba,
-                focus="Six-Factor Profile",
-            )
-        with b2:
-            _nav_button(
-                "Open queue details",
-                "brief-transition-queue",
-                page=PAGE_TRANSITION,
-                ba=sel_ba,
-                focus="Interconnection Queue",
-            )
-    with k4x, st.expander("Interpret Renewable Share", expanded=False):
-        st.write(
-            "Renewable Share is derived from generation mix using "
-            "SUN, WND, and WAT fuel categories."
-        )
-        st.write(
-            "Lower renewable share can imply more headroom; "
-            "higher share shows an already advanced mix."
-        )
-        b1, b2 = st.columns(2)
-        with b1:
-            _nav_button(
-                "Open factor breakdown",
-                "brief-renew-transition",
-                page=PAGE_TRANSITION,
-                ba=sel_ba,
-                focus="Renewable Headroom",
-            )
-        with b2:
-            _nav_button(
-                "Open compliance mix",
-                "brief-renew-compliance",
-                page=PAGE_COMPLIANCE,
-                ba=sel_ba,
-                focus="Generation Mix",
-            )
-
-    # LMP context line — only renders when this BA maps to a covered ISO
-    spikes = briefing.get("lmp_spike_locations")
-    negs = briefing.get("lmp_negative_locations")
-    if spikes is not None or negs is not None:
-        iso_label = briefing.get("iso", "")
-        bits = []
-        if spikes:
-            bits.append(f"<span style='color:{C_RED};font-weight:600;'>{spikes} spike</span>")
-        if negs:
-            bits.append(f"<span style='color:{C_AMBER};font-weight:600;'>{negs} negative</span>")
-        if not bits:
-            bits.append(f"<span style='color:{C_GREEN};'>no LMP anomalies</span>")
-        st.markdown(
-            f"<div style='color:{C_MUTED};font-size:0.88rem;margin-top:0.5rem;'>"
-            f"⚡ <b>{iso_label} LMP:</b> {' · '.join(bits)} in last 6h</div>",
-            unsafe_allow_html=True,
-        )
-        _nav_button(
-            "Open LMP anomaly diagnostics",
-            "brief-lmp-open",
-            page=PAGE_ANOMALY,
-            ba=sel_ba,
-            iso=iso_label,
-            focus="LMP Price Anomalies",
-        )
+    _render_policy_recommendation(sel_ba, briefing, peer_metrics, _S["transition"])
+    _render_peer_comparison_strip(peer_metrics)
+    _render_signal_tensions(sel_ba, briefing, peer_metrics, _S["transition"], sections=sec)
 
     _section_divider()
 
@@ -1160,6 +1587,19 @@ if page == PAGE_BRIEFING:
             _style(fig, h=300)
             st.plotly_chart(fig, use_container_width=True)
             _source(f"EIA Form 930 hourly demand and day-ahead forecast for {sel_ba}.")
+            forecast_status = briefing.get("anomaly_status", "NO_DATA")
+            if forecast_status in {"RED", "YELLOW"}:
+                _why_this_matters(
+                    "Elevated forecast error is an early operating-risk signal: it can "
+                    "raise reserve needs, stress compliance reporting, and distort "
+                    "near-term procurement decisions."
+                )
+            else:
+                _why_this_matters(
+                    "Forecast error is behaving inside this BA's historical control "
+                    "range, which makes other signals like queue activity and fuel mix "
+                    "more credible as the main policy story."
+                )
             _methodology(
                 "Plotted series: <code>abs_error<sub>t</sub> = |demand<sub>t</sub> − "
                 "forecast<sub>t</sub>|</code> for the last "
@@ -1167,24 +1607,6 @@ if page == PAGE_BRIEFING:
                 "of <code>abs_error</code> computed over the full 3-month "
                 "history for this BA."
             )
-        cta1, cta2 = st.columns(2)
-        with cta1:
-            _nav_button(
-                "Open anomaly diagnostics",
-                "brief-forecast-open-anomaly",
-                page=PAGE_ANOMALY,
-                ba=sel_ba,
-                focus="Error Control Chart",
-            )
-        with cta2:
-            _nav_button(
-                "Open compliance forecast section",
-                "brief-forecast-open-comp",
-                page=PAGE_COMPLIANCE,
-                ba=sel_ba,
-                focus="Forecast Accuracy",
-            )
-
     with col_b:
         st.subheader(
             "Top Arbitrage Routes",
@@ -1200,6 +1622,11 @@ if page == PAGE_BRIEFING:
         ba_arb = arb[arb["fromba"] == sel_ba].head(5) if not arb.empty else pd.DataFrame()
         if ba_arb.empty:
             st.info("No outgoing arbitrage signals for this BA.")
+            _why_this_matters(
+                "Without a persistent outbound route, this BA's near-term story is less "
+                "about cross-border price arbitrage and more about local reliability, "
+                "fuel mix, or interconnection signals."
+            )
         else:
             ba_arb = ba_arb.copy()
             ba_arb["route"] = ba_arb["fromba"] + " → " + ba_arb["toba"]
@@ -1224,37 +1651,18 @@ if page == PAGE_BRIEFING:
                 "EIA Form 930 hourly interchange data for all BA pairs where "
                 f"<code>fromba = {sel_ba}</code>."
             )
+            top_route = ba_arb.iloc[0]
+            _why_this_matters(
+                f"The strongest route, {top_route['route']}, is a practical proxy "
+                "for where congestion, hedging value, or flexible load/storage could "
+                "matter most during peak hours."
+            )
             _methodology(
                 "See full derivation in the Arbitrage Signals module. "
                 "Score combines <b>directional strength</b> (60%, normalized "
                 "peak-hour absolute flow) and <b>consistency</b> (40%, "
                 "<code>1 − volatility/max_volatility</code>), scaled to 0–100."
             )
-        cta1, cta2 = st.columns(2)
-        with cta1:
-            top_route = ba_arb.iloc[0] if not ba_arb.empty else None
-            _nav_button(
-                "Open arbitrage module",
-                "brief-arb-open",
-                page=PAGE_ARBITRAGE,
-                ba=sel_ba,
-                fromba=top_route["fromba"] if top_route is not None else None,
-                toba=top_route["toba"] if top_route is not None else None,
-                focus="Top Arbitrage Routes",
-            )
-        with cta2:
-            if not ba_arb.empty:
-                top_route = ba_arb.iloc[0]
-                _nav_button(
-                    "Inspect top route",
-                    "brief-arb-route",
-                    page=PAGE_ARBITRAGE,
-                    ba=sel_ba,
-                    fromba=top_route["fromba"],
-                    toba=top_route["toba"],
-                    focus="Route Profile",
-                )
-
     _section_divider()
 
     # Module preview row 2: transition + queue
@@ -1321,24 +1729,7 @@ if page == PAGE_BRIEFING:
                 "interconnection queue (Berkeley Lab, thru 2024). Full derivation "
                 "of each axis is documented in the Transition Scoring module."
             )
-        cta1, cta2 = st.columns(2)
-        with cta1:
-            _nav_button(
-                "Open factor breakdown",
-                "brief-trans-open",
-                page=PAGE_TRANSITION,
-                ba=sel_ba,
-                focus="Six-Factor Profile",
-            )
-        with cta2:
-            _nav_button(
-                "Open queue detail",
-                "brief-trans-queue",
-                page=PAGE_TRANSITION,
-                ba=sel_ba,
-                focus="Interconnection Queue",
-            )
-
+            _why_this_matters(_transition_profile_why(row))
     with col_d:
         st.subheader(
             "Interconnection Queue",
@@ -1386,16 +1777,13 @@ if page == PAGE_BRIEFING:
                     f"filtered to projects mapped to BA {sel_ba} by "
                     "ISO/region affiliation or state."
                 )
+                _why_this_matters(
+                    "Active queue capacity shows developer appetite; the resource mix "
+                    "shows whether that appetite is concentrated in technologies that "
+                    "can actually support the BA's transition bottleneck."
+                )
             else:
                 st.caption("No queue breakdown available for this BA.")
-        _nav_button(
-            "Open full queue details",
-            "brief-queue-open",
-            page=PAGE_TRANSITION,
-            ba=sel_ba,
-            focus="Interconnection Queue",
-        )
-
     _section_divider()
 
     # Compliance teaser
@@ -1410,15 +1798,6 @@ if page == PAGE_BRIEFING:
             "in the Compliance Reports module."
         ),
     )
-    report = generate_compliance_summary(
-        _D["demand"],
-        _D["interchange"],
-        _D["fuel"],
-        sel_ba,
-        anomaly_alerts=_S["alerts"],
-        transition_scores=_S["transition"],
-    )
-    sec = report["sections"]
     cc1, cc2, cc3, cc4 = st.columns(4)
     if "demand" in sec:
         cc1.metric("Avg Demand", f"{sec['demand']['avg_demand_mwh']:,.0f} MWh")
@@ -1430,6 +1809,11 @@ if page == PAGE_BRIEFING:
     _source(
         "EIA Form 930 (hourly demand, forecast, and interchange) aggregated over "
         "the full 3-month window for this BA."
+    )
+    _why_this_matters(
+        "This snapshot converts regulatory reporting metrics into operating context: "
+        "demand scale, forecast accuracy, and trading connectivity explain how exposed "
+        "the BA is before looking at forward-looking transition signals."
     )
     _methodology(
         "<b>MAPE</b> (Mean Absolute Percentage Error): "
@@ -1676,6 +2060,18 @@ elif page == PAGE_ANOMALY:
                 f"EIA Form 930 hourly demand and day-ahead forecast for {sel_ba}, "
                 "retrieved via EIA API v2 (<code>electricity/rto/region-data</code>)."
             )
+            if not ba_a.empty and ba_a.iloc[0]["status"] in {"RED", "YELLOW"}:
+                _why_this_matters(
+                    "Persistent control-band breaches are more policy-relevant than "
+                    "one-off errors because they suggest a repeatable planning or "
+                    "data-quality issue."
+                )
+            else:
+                _why_this_matters(
+                    "A stable control chart lowers short-run reliability concern and "
+                    "makes structural signals, such as queue and fuel mix, easier to "
+                    "interpret."
+                )
             _methodology(
                 "<b>Absolute forecast error</b>: "
                 "<code>abs_error<sub>t</sub> = |demand<sub>t</sub> − "
@@ -1738,6 +2134,11 @@ elif page == PAGE_ANOMALY:
             _source(
                 "EIA Form 930 hourly demand and day-ahead forecast across all 10 "
                 "tracked BAs, retrieved via EIA API v2."
+            )
+            _why_this_matters(
+                "The peer distribution prevents large systems from looking risky only "
+                "because they are large; it shows whether a BA is unusual relative to "
+                "its own and peer error patterns."
             )
             _methodology(
                 "<b>Distribution</b>: for each BA, all hourly "
@@ -1825,50 +2226,15 @@ elif page == PAGE_ANOMALY:
                     ],
                 )
 
-            with st.expander("Investigate flagged LMP locations", expanded=False):
-                flagged = pd.concat([spike.head(6), neg.head(6)], ignore_index=True)
-                if flagged.empty:
-                    st.caption("No flagged LMP locations.")
-                else:
-                    for _, r in flagged.iterrows():
-                        st.markdown(f"**{r['iso']} - {r['location']}**")
-                        if r["status"] == "SPIKE":
-                            st.write(
-                                "Spike condition: recent average price is materially "
-                                "above the historical median."
-                            )
-                        else:
-                            st.write(
-                                "Negative-price condition: at least one recent hour "
-                                "fell below the negative threshold."
-                            )
-                        b1, b2 = st.columns(2)
-                        with b1:
-                            _nav_button(
-                                "Open this drill-down",
-                                f"anom-lmp-open-{r['iso']}-{r['location']}",
-                                page=PAGE_ANOMALY,
-                                ba=sel_ba,
-                                iso=r["iso"],
-                                location=r["location"],
-                                focus="LMP Time Series",
-                            )
-                        with b2:
-                            _nav_button(
-                                "Open briefing",
-                                f"anom-lmp-brief-{r['iso']}-{r['location']}",
-                                page=PAGE_BRIEFING,
-                                ba=sel_ba,
-                                iso=r["iso"],
-                                location=r["location"],
-                                focus="LMP Price Anomalies",
-                            )
-                        st.markdown("---")
-
             _source(
                 "Day-ahead hourly LMP for CAISO and ERCOT zones/hubs, retrieved "
                 "via the <code>gridstatus</code> Python library "
                 "(CAISO OASIS <code>PRC_LMP</code> API and ERCOT MIS reports)."
+            )
+            _why_this_matters(
+                "Price spikes and negative prices are dispatch signals: they point "
+                "to scarcity, congestion, or oversupply conditions where flexible "
+                "load and storage can have immediate value."
             )
             _methodology(
                 "<b>Inputs</b>: hourly day-ahead LMP series "
@@ -1979,6 +2345,11 @@ elif page == PAGE_ANOMALY:
                 _source(
                     f"Day-ahead hourly LMP for {iso_pick} {loc_pick}, retrieved "
                     "via the <code>gridstatus</code> library over a 30-day window."
+                )
+                _why_this_matters(
+                    "The time series separates a sustained price regime from a single "
+                    "outlier, which matters for deciding whether intervention should "
+                    "be operational, market-based, or just monitored."
                 )
                 _methodology(
                     "The three horizontal reference lines show the thresholds "
@@ -2092,6 +2463,11 @@ elif page == PAGE_ARBITRAGE:
             "EIA Form 930 hourly interchange data across all BA pairs, "
             "filtered to NERC peak hours (14:00–20:00)."
         )
+        _why_this_matters(
+            "Peak-hour interchange is a market-stress signal: large, steady flows "
+            "suggest where congestion rents, storage value, or regional coordination "
+            "questions are most likely to appear."
+        )
         _methodology(
             "<b>Inputs</b> (per BA pair, averaged over peak hours only):<br/>"
             "&nbsp;&nbsp;• <code>peak_flow</code> = mean hourly interchange "
@@ -2146,37 +2522,10 @@ elif page == PAGE_ARBITRAGE:
             "EIA Form 930 hourly interchange, aggregated to NERC peak hours "
             "over the full 3-month window."
         )
-        quick_route = disp.iloc[0]
-        qa1, qa2, qa3 = st.columns(3)
-        with qa1:
-            _nav_button(
-                "Inspect top route",
-                "arb-top-route",
-                page=PAGE_ARBITRAGE,
-                ba=quick_route["fromba"],
-                fromba=quick_route["fromba"],
-                toba=quick_route["toba"],
-                focus="Route Profile",
-            )
-        with qa2:
-            _nav_button(
-                "Open briefing for source BA",
-                "arb-top-brief",
-                page=PAGE_BRIEFING,
-                ba=quick_route["fromba"],
-                fromba=quick_route["fromba"],
-                toba=quick_route["toba"],
-                focus="Top Arbitrage Routes",
-            )
-        with qa3:
-            _nav_button(
-                "Open compliance for source BA",
-                "arb-top-comp",
-                page=PAGE_COMPLIANCE,
-                ba=quick_route["fromba"],
-                focus="Interchange",
-            )
-
+        _why_this_matters(
+            "The table turns the visual ranking into an auditable shortlist, making "
+            "it easier to defend why one route deserves attention over another."
+        )
         _section_divider()
 
         # Heatmap
@@ -2242,6 +2591,11 @@ elif page == PAGE_ARBITRAGE:
                     "EIA Form 930 hourly interchange for the top 8 arbitrage "
                     "routes, grouped by hour-of-day over the 3-month window."
                 )
+                _why_this_matters(
+                    "A route that is consistently directional during peak hours is "
+                    "more investable than one with the same average flow but unstable "
+                    "hour-to-hour behavior."
+                )
                 _methodology(
                     "For each BA pair <code>(fromba, toba)</code>:<br/>"
                     "&nbsp;&nbsp;1. Filter hourly interchange to this pair.<br/>"
@@ -2276,47 +2630,11 @@ elif page == PAGE_ARBITRAGE:
         sel_pair = st.selectbox("Select route", pair_opts, key="route_select")
         if sel_pair:
             parts = sel_pair.split(" → ")
-            _set_nav(ba=parts[0], fromba=parts[0], toba=parts[1], focus="Route Profile")
+            _set_nav(fromba=parts[0], toba=parts[1], focus="Route Profile", sync_sidebar=False)
             route_row = signals[(signals["fromba"] == parts[0]) & (signals["toba"] == parts[1])]
             if not route_row.empty:
                 route_row = route_row.iloc[0]
                 st.info(_route_signal_summary(route_row))
-                b1, b2, b3, b4 = st.columns(4)
-                with b1:
-                    _nav_button(
-                        "Inspect route",
-                        "arb-route-self",
-                        page=PAGE_ARBITRAGE,
-                        ba=parts[0],
-                        fromba=parts[0],
-                        toba=parts[1],
-                        focus="Route Profile",
-                    )
-                with b2:
-                    _nav_button(
-                        "Set from-BA as current BA",
-                        "arb-route-set-ba",
-                        ba=parts[0],
-                        focus="Route Profile",
-                    )
-                with b3:
-                    _nav_button(
-                        "Open Executive Briefing",
-                        "arb-route-brief",
-                        page=PAGE_BRIEFING,
-                        ba=parts[0],
-                        fromba=parts[0],
-                        toba=parts[1],
-                        focus="Top Arbitrage Routes",
-                    )
-                with b4:
-                    _nav_button(
-                        "Open Compliance",
-                        "arb-route-comp",
-                        page=PAGE_COMPLIANCE,
-                        ba=parts[0],
-                        focus="Interchange",
-                    )
             prof = get_pair_hourly_profile(_D["interchange"], parts[0], parts[1])
             if not prof.empty:
                 fig_p = go.Figure()
@@ -2350,6 +2668,11 @@ elif page == PAGE_ARBITRAGE:
                 _source(
                     f"EIA Form 930 hourly interchange for {sel_pair}, "
                     "grouped by hour-of-day across the 3-month window."
+                )
+                _why_this_matters(
+                    "The route profile shows when the opportunity exists, which is "
+                    "critical for storage duration, flexible load scheduling, and "
+                    "hedge design."
                 )
                 _methodology(
                     "Each bar is the mean of <code>value</code> for the "
@@ -2426,6 +2749,11 @@ elif page == PAGE_ARBITRAGE:
         _source(
             "Day-ahead hourly LMP for all CAISO and ERCOT zones/hubs over a "
             "30-day window, retrieved via the <code>gridstatus</code> library."
+        )
+        _why_this_matters(
+            "Internal zonal spreads reveal constraints that inter-BA flows hide; "
+            "they are especially useful for storage siting and congestion-risk "
+            "screening inside an ISO."
         )
         _methodology(
             "For every pair of distinct locations <code>(A, B)</code> within "
@@ -2556,6 +2884,11 @@ elif page == PAGE_TRANSITION:
             "window) + LBNL Queued Up interconnection queue dataset "
             "(<code>queue_ba_summary</code>, thru 2024)."
         )
+        _why_this_matters(
+            "The ranking is a triage layer: it separates BAs where clean-energy "
+            "investment looks both needed and feasible from BAs where one condition "
+            "is missing."
+        )
         _methodology(
             "Each of the six factor scores is computed independently on its "
             "native 0–100 scale (details in individual factor tooltips below), "
@@ -2582,41 +2915,6 @@ elif page == PAGE_TRANSITION:
             "BA, the composite reduces to the four EIA factors at equal 25% "
             "weighting."
         )
-        quick_ba_map = {f"{r['ba']} - {r['name']}": r["ba"] for _, r in scores.iterrows()}
-        quick_pick = st.selectbox(
-            "Use ranked BA",
-            list(quick_ba_map.keys()),
-            key="transition_quick_pick",
-        )
-        picked_ba = quick_ba_map[quick_pick]
-        qa1, qa2, qa3, qa4 = st.columns(4)
-        with qa1:
-            _nav_button("Use this BA", "trans-use-ba", ba=picked_ba, focus="Transition Scoring")
-        with qa2:
-            _nav_button(
-                "Open Executive Briefing",
-                "trans-open-brief",
-                page=PAGE_BRIEFING,
-                ba=picked_ba,
-                focus="Transition Score",
-            )
-        with qa3:
-            _nav_button(
-                "Open Compliance",
-                "trans-open-comp",
-                page=PAGE_COMPLIANCE,
-                ba=picked_ba,
-                focus="Cross-Module Signals",
-            )
-        with qa4:
-            _nav_button(
-                "See anomaly context",
-                "trans-open-anom",
-                page=PAGE_ANOMALY,
-                ba=picked_ba,
-                focus="Forecast Status",
-            )
-
         # Radar + table
         col_r, col_t = st.columns([1, 1])
         with col_r:
@@ -2675,39 +2973,8 @@ elif page == PAGE_TRANSITION:
                 _style(fig_r, h=400)
                 st.plotly_chart(fig_r, use_container_width=True)
                 st.info(_transition_strength_summary(row))
-                b1, b2, b3, b4 = st.columns(4)
-                with b1:
-                    _nav_button(
-                        "Use this BA",
-                        "trans-selected-use",
-                        ba=sel_ba,
-                        focus="Six-Factor Profile",
-                    )
-                with b2:
-                    _nav_button(
-                        "Open Executive Briefing",
-                        "trans-selected-brief",
-                        page=PAGE_BRIEFING,
-                        ba=sel_ba,
-                        focus="Transition Score",
-                    )
-                with b3:
-                    _nav_button(
-                        "Open Compliance",
-                        "trans-selected-comp",
-                        page=PAGE_COMPLIANCE,
-                        ba=sel_ba,
-                        focus="Cross-Module Signals",
-                    )
-                with b4:
-                    _nav_button(
-                        "Inspect queue details",
-                        "trans-selected-queue",
-                        page=PAGE_TRANSITION,
-                        ba=sel_ba,
-                        focus="Interconnection Queue",
-                    )
                 _source(f"EIA Form 930 + LBNL queue, filtered to BA {sel_ba}.")
+                _why_this_matters(_transition_profile_why(row))
                 _methodology(
                     "<b>1. Demand Growth</b> — compare average daily demand "
                     "between the first and last thirds of the 3-month window: "
@@ -2861,10 +3128,27 @@ elif page == PAGE_TRANSITION:
                     yaxis_title="MW",
                 )
                 _style(fig_qt, h=360)
+                fig_qt.update_layout(
+                    legend=dict(
+                        orientation="v",
+                        yanchor="top",
+                        y=0.98,
+                        xanchor="right",
+                        x=0.98,
+                        bgcolor="rgba(255,255,255,0.85)",
+                        bordercolor="#e2e8f0",
+                        borderwidth=1,
+                    ),
+                )
                 st.plotly_chart(fig_qt, use_container_width=True)
                 _source(
                     f"LBNL <code>queue_type_summary</code> table for BA {sel_ba}, "
                     "aggregated by <code>type_clean</code> resource category."
+                )
+                _why_this_matters(
+                    "The gap between active MW and operational MW is a bottleneck "
+                    "signal: it shows whether developer interest is converting into "
+                    "built capacity or getting stuck in the interconnection process."
                 )
                 _methodology(
                     "For each resource type:<br/>"
@@ -2901,6 +3185,11 @@ elif page == PAGE_TRANSITION:
             _style(fig_qb, h=360)
             st.plotly_chart(fig_qb, use_container_width=True)
             _source("LBNL <code>queue_ba_summary</code> table across the 10 tracked BAs.")
+            _why_this_matters(
+                "Cross-BA queue capacity shows where developers are voting with "
+                "applications; unusually high active MW can imply both opportunity "
+                "and future process congestion."
+            )
             _methodology(
                 "Single aggregation per BA: <code>active_capacity_mw = "
                 "sum(mw1)</code> restricted to "
@@ -2995,6 +3284,11 @@ elif page == PAGE_TRANSITION:
                 "sampled locations covering all tracked BAs. BA centroids are "
                 "analytical approximations, not administrative coordinates."
             )
+            _why_this_matters(
+                "Resource quality only becomes actionable when it lines up with "
+                "queue throughput and operational need; this map helps distinguish "
+                "good geography from investable geography."
+            )
             _methodology(
                 "<b>GHI (Global Horizontal Irradiance)</b>: total solar "
                 "radiation received on a horizontal surface, averaged "
@@ -3042,6 +3336,17 @@ elif page == PAGE_COMPLIANCE:
         transition_scores=_S["transition"],
     )
     sec = report["sections"]
+    compliance_briefing = build_executive_briefing(
+        ba=sel_ba,
+        demand_df=_D["demand"],
+        interchange_df=_D["interchange"],
+        fuel_df=_D["fuel"],
+        anomaly_alerts=_S["alerts"],
+        arbitrage_signals=_S["arbitrage"],
+        transition_scores=_S["transition"],
+        lmp_alerts=_S["lmp_alerts"],
+    )
+    compliance_peer_metrics = _build_ba_peer_metrics(sel_ba, _D["demand"], _S["transition"])
 
     hc1, hc2 = st.columns([3, 1])
     hc1.markdown(f"## {report['ba']} — {report['ba_name']}")
@@ -3076,6 +3381,11 @@ elif page == PAGE_COMPLIANCE:
                 f"EIA Form 930 <code>type-name = 'Demand'</code> for {sel_ba}, "
                 "over the full 3-month rolling window."
             )
+            _why_this_matters(
+                "Demand scale defines the size of the compliance problem: larger "
+                "peak loads make forecast misses, reserve planning, and capacity "
+                "procurement more consequential."
+            )
             _methodology(
                 "<code>avg_demand = mean(value)</code>; "
                 "<code>peak_demand = max(value)</code>; "
@@ -3083,24 +3393,6 @@ elif page == PAGE_COMPLIANCE:
                 "<code>total_hours = count(value)</code>, all computed on the "
                 "<code>Demand</code> rows of <code>hourly_demand</code>."
             )
-            b1, b2 = st.columns(2)
-            with b1:
-                _nav_button(
-                    "Open Executive Briefing",
-                    "comp-demand-brief",
-                    page=PAGE_BRIEFING,
-                    ba=sel_ba,
-                    focus="Latest Demand",
-                )
-            with b2:
-                _nav_button(
-                    "Open anomaly diagnostics",
-                    "comp-demand-anom",
-                    page=PAGE_ANOMALY,
-                    ba=sel_ba,
-                    focus="Error Control Chart",
-                )
-
     with c2:
         if "forecast_accuracy" in sec:
             fa = sec["forecast_accuracy"]
@@ -3129,6 +3421,18 @@ elif page == PAGE_COMPLIANCE:
                 "EIA Form 930 <code>Demand</code> and <code>Day-ahead demand "
                 f"forecast</code> rows for {sel_ba}, pivoted and differenced."
             )
+            if fa["mape"] > 5:
+                _why_this_matters(
+                    "MAPE above 5% is a compliance and operations warning: it can "
+                    "signal model drift, unusual load behavior, or avoidable reserve "
+                    "costs."
+                )
+            else:
+                _why_this_matters(
+                    "Forecast accuracy is within a more typical operating band, so "
+                    "regulatory attention can shift toward structural signals like "
+                    "interchange and generation mix."
+                )
             _methodology(
                 "Let <code>error<sub>t</sub> = demand<sub>t</sub> − "
                 "forecast<sub>t</sub></code>. Then:<br/>"
@@ -3140,24 +3444,6 @@ elif page == PAGE_COMPLIANCE:
                 "&nbsp;&nbsp;• <code>Bias = mean( error<sub>t</sub> )</code>"
                 " — signed, not absolute"
             )
-            b1, b2 = st.columns(2)
-            with b1:
-                _nav_button(
-                    "Open anomaly diagnostics",
-                    "comp-forecast-anom",
-                    page=PAGE_ANOMALY,
-                    ba=sel_ba,
-                    focus="Forecast Accuracy",
-                )
-            with b2:
-                _nav_button(
-                    "Open Executive Briefing",
-                    "comp-forecast-brief",
-                    page=PAGE_BRIEFING,
-                    ba=sel_ba,
-                    focus="Forecast Status",
-                )
-
     _section_divider()
     c3, c4 = st.columns(2)
     with c3:
@@ -3186,6 +3472,18 @@ elif page == PAGE_COMPLIANCE:
                 "EIA Form 930 <code>hourly_interchange</code> rows where "
                 f"<code>fromba = {sel_ba}</code>."
             )
+            if ix["avg_net_mwh"] < 0:
+                _why_this_matters(
+                    "A net-import position means local reliability and price exposure "
+                    "depend partly on neighboring systems, making transmission and "
+                    "regional coordination policy-relevant."
+                )
+            else:
+                _why_this_matters(
+                    "A net-export position means this BA can influence neighboring "
+                    "markets; persistent exports may reveal where congestion, market "
+                    "power, or resource adequacy debates will surface."
+                )
             _methodology(
                 "EIA convention: positive <code>value</code> = export, "
                 "negative = import.<br/>"
@@ -3197,24 +3495,6 @@ elif page == PAGE_COMPLIANCE:
                 "&nbsp;&nbsp;• <code>n_trading_partners = "
                 "nunique(toba)</code> — count of distinct destinations"
             )
-            b1, b2 = st.columns(2)
-            with b1:
-                _nav_button(
-                    "Open arbitrage signals",
-                    "comp-interchange-arb",
-                    page=PAGE_ARBITRAGE,
-                    ba=sel_ba,
-                    focus="Top Opportunities",
-                )
-            with b2:
-                _nav_button(
-                    "Open Executive Briefing",
-                    "comp-interchange-brief",
-                    page=PAGE_BRIEFING,
-                    ba=sel_ba,
-                    focus="Top Arbitrage Routes",
-                )
-
     with c4:
         if "generation_mix" in sec:
             gm = sec["generation_mix"]
@@ -3259,6 +3539,21 @@ elif page == PAGE_COMPLIANCE:
                     f"EIA Form 930 <code>hourly_fuel_type</code> rows for "
                     f"{sel_ba} aggregated over the full 3-month window."
                 )
+                renewable_share = sum(
+                    gm["fuel_shares_pct"].get(ft, 0) for ft in ["SUN", "WND", "WAT"]
+                )
+                if renewable_share >= 45:
+                    _why_this_matters(
+                        "A high renewable share shifts the policy question from "
+                        "simple buildout toward integration, flexibility, storage, "
+                        "and congestion management."
+                    )
+                else:
+                    _why_this_matters(
+                        "A lower renewable share indicates more transition headroom, "
+                        "but the strongest policy case depends on whether the queue "
+                        "and transmission system can absorb new projects."
+                    )
                 _methodology(
                     "For each fuel type <code>f</code>:<br/>"
                     "&nbsp;&nbsp;<code>share<sub>f</sub> = sum(value | "
@@ -3269,24 +3564,6 @@ elif page == PAGE_COMPLIANCE:
                     "aggregation by sum treats each hour as a 1 MWh bucket, "
                     "which is the correct energy-weighted interpretation."
                 )
-                b1, b2 = st.columns(2)
-                with b1:
-                    _nav_button(
-                        "Open transition factors",
-                        "comp-genmix-transition",
-                        page=PAGE_TRANSITION,
-                        ba=sel_ba,
-                        focus="Renewable Headroom",
-                    )
-                with b2:
-                    _nav_button(
-                        "Open Executive Briefing",
-                        "comp-genmix-brief",
-                        page=PAGE_BRIEFING,
-                        ba=sel_ba,
-                        focus="Renewable Share",
-                    )
-
     _section_divider()
 
     # §5 Cross-Module Signals
@@ -3315,39 +3592,30 @@ elif page == PAGE_COMPLIANCE:
                 st.markdown(_status_pill(cross["anomaly_status"]), unsafe_allow_html=True)
                 if "hours_above_p95" in cross:
                     st.caption(f"Hours above P95 in last 6h: {cross['hours_above_p95']}")
-                _nav_button(
-                    "Open anomaly diagnostics",
-                    "comp-cross-anom",
-                    page=PAGE_ANOMALY,
-                    ba=sel_ba,
-                    focus="Forecast Status",
-                )
             else:
                 st.caption("No anomaly data.")
         with cm2:
             if "transition_composite_score" in cross:
                 cm2.metric("Transition Score", f"{cross['transition_composite_score']:.1f}")
-                _nav_button(
-                    "Open transition factors",
-                    "comp-cross-transition",
-                    page=PAGE_TRANSITION,
-                    ba=sel_ba,
-                    focus="Six-Factor Profile",
-                )
         with cm3:
             if "active_queue_mw" in cross:
                 cm3.metric("Active Queue", f"{cross['active_queue_mw']:,.0f} MW")
-                _nav_button(
-                    "Open queue details",
-                    "comp-cross-queue",
-                    page=PAGE_TRANSITION,
-                    ba=sel_ba,
-                    focus="Interconnection Queue",
-                )
+        _render_signal_tensions(
+            sel_ba,
+            compliance_briefing,
+            compliance_peer_metrics,
+            _S["transition"],
+            sections=sec,
+        )
         _source(
             "Injected from the Anomaly Detection and Transition Scoring "
             "modules for this BA. Click through to those modules for full "
             "derivation."
+        )
+        _why_this_matters(
+            "Cross-module signals make the compliance report forward-looking: they "
+            "connect historical reporting performance with current risk and future "
+            "investment feasibility."
         )
         _methodology(
             "<b>Anomaly Status</b>: the <code>status</code> field from the "
@@ -3407,23 +3675,26 @@ elif page == PAGE_ABOUT:
         It is organized around six modules:
 
         1. **Executive Briefing** — the main investigation hub for a selected
-           BA, combining KPI summaries, interpretations, and drill-down entry points
+           BA, combining KPI summaries, policy recommendations, peer-median
+           comparisons, and cross-signal contradiction detection
         2. **Anomaly Detection** — BA-level forecast error monitoring plus
-           ISO LMP anomaly triage with prefilled drill-down context
+           ISO LMP anomaly triage and price time-series diagnostics
         3. **Arbitrage Signals** — persistent peak-hour interchange flow
            patterns suggesting cross-market price imbalance
         4. **Transition Scoring** — six-factor renewable opportunity scoring
            combining EIA operational data, LBNL queue activity, and NREL solar
            resource potential
         5. **Compliance Reports** — FERC-style §1–§4 operational summaries
-           with §5 cross-module signal injection and return links to visual modules
+           with §5 cross-module signal injection and contradiction screening
         6. **About** — this page
 
         ---
         ## Investigation workflow
 
         This app is designed to behave as one connected workflow rather than
-        six disconnected pages.
+        six disconnected pages. The interface keeps the required module tabs,
+        but avoids excessive nested drill-down controls; most interpretation is
+        now surfaced directly through compact analytical panels.
 
         A shared Streamlit session-state layer preserves investigation context
         across modules, including:
@@ -3433,10 +3704,30 @@ elif page == PAGE_ABOUT:
         - selected ISO and LMP location
         - current focus area
 
-        This means a user can start from the Executive Briefing, jump into an
-        anomaly, inspect a route, move into a compliance summary, and continue
-        with the same analytical context instead of repeatedly reselecting the
-        same entity.
+        This means a user can start from the Executive Briefing, move into an
+        anomaly, inspect a route, or read a compliance summary while preserving
+        the same analytical context instead of repeatedly reselecting the same
+        entity.
+
+        ---
+        ## Decision intelligence layer
+
+        The latest version adds a lightweight rule-based interpretation layer on
+        top of the charts. It is not a black-box model; it translates existing
+        signals into policy-relevant judgments:
+
+        - **Policy Recommendation** — a short BA-specific recommendation based
+          on forecast risk, transition score, active queue, renewable share, and
+          arbitrage strength
+        - **Selected BA vs Peer Median** — compares the selected BA against the
+          peer median for forecast MAPE, transition score, renewable share, and
+          active queue capacity
+        - **Why this matters** — concise decision-oriented notes under key charts
+          explaining the policy or operational significance of each result
+        - **Cross-Signal Contradiction Detector** — flags tensions such as strong
+          transition potential but weak queue activity, large active queue but low
+          completion score, high renewable share with continued pipeline pressure,
+          or chronic forecast weakness without an acute anomaly
 
         ---
         ## Methodology
@@ -3474,6 +3765,20 @@ elif page == PAGE_ABOUT:
         The compliance report goes beyond operational metrics by injecting the
         live anomaly status and transition score into §5, giving regulators and
         operators a consolidated regulatory + strategic snapshot in one view.
+
+        ### Cross-signal contradiction screening
+        The contradiction detector is a transparent rules layer. It compares
+        selected-BA metrics against peer medians and six-factor transition
+        components, then flags analytical tensions such as:
+
+        - high transition score plus elevated forecast anomaly status
+        - strong transition fundamentals but below-median active queue
+        - above-median active queue but weak queue completion
+        - renewable headroom without matching developer activity
+        - strong arbitrage route score with a narrow trading network
+
+        These flags are intended to guide discussion, not to produce automated
+        investment or compliance decisions.
 
         ---
         ## Data sources
@@ -3519,12 +3824,13 @@ elif page == PAGE_ABOUT:
         `st.cache_resource(ttl=3600)`, then serves all pages from in-memory
         DataFrames for sub-second navigation across modules.
 
-        ### Stage 3: Investigation layer
+        ### Stage 3: Investigation and interpretation layer
         A lightweight navigation state layer built with `st.session_state`
-        connects the modules into one investigation workflow. Drill-down
-        buttons pass BA, route, ISO, location, and focus context from one
-        page to another so high-level signals can be traced into deeper
-        diagnostics without manual reconfiguration.
+        connects the modules into one investigation workflow. A rule-based
+        interpretation layer then adds policy recommendations, peer comparisons,
+        Why-this-matters notes, and contradiction flags directly inside the
+        Streamlit pages so the dashboard reads as an analytical briefing rather
+        than a collection of unrelated plots.
 
         ### BigQuery dataset: `sipa-adv-c-silly-penguin.eia_data`
         **Raw tables**: `hourly_demand`, `hourly_interchange`, `hourly_fuel_type`,
@@ -3551,9 +3857,11 @@ elif page == PAGE_ABOUT:
         - **Weather is single-point.** One reference location per BA — adequate
           for high-level demand-temperature correlation, not sufficient for
           fine-grained generation forecasting.
-        - **Workflow guidance is heuristic.** Cross-page drill-downs preserve
-          context and improve navigation, but they do not replace expert
-          interpretation of market structure or policy significance.
+        - **Recommendation and contradiction logic is heuristic.** The policy
+          recommendation card, peer comparisons, Why-this-matters notes, and
+          contradiction detector translate existing signals into discussion
+          prompts; they do not replace expert interpretation of market structure
+          or policy significance.
         - **Arbitrage signals reflect physical flow patterns, not confirmed
           price spreads.** Without LMP data, we infer opportunity from
           persistent directional flows during peak hours rather than measuring

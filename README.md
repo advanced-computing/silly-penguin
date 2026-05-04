@@ -6,6 +6,10 @@ A Streamlit dashboard for investigating U.S. grid operations through one connect
 
 **Live App**: [silly-penguin.streamlit.app](https://silly-penguin-hv5ae2e4zodut2mc2oarrh.streamlit.app/)
 
+**Personal Reflections**: 
+- **Xingyi Wang** - [Personal Project Write-up](https://docs.google.com/document/d/1ITZCofE7Ih6L3gSWFZV5A3I8EIlwUXBZ7s_f3Ovf21s/edit?tab=t.0#heading=h.jo438h3olnf4)
+- **Wuhao Xia** - [Personal Project Write-up](https://carlboy2002.github.io/grid_intelligence_platform_writeup.html)
+
 ---
 
 ## Research Question
